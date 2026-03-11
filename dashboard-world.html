@@ -691,6 +691,135 @@ function drawAgent(agent) {
   }
 }
 
+// ── HABBO STYLE SPRITE (blocky pixel-art) ──
+const HAIR_COLORS = ['#2c1810','#4a2c17','#8b4513','#d4a574','#1a1a2e','#c0392b','#f39c12','#2ecc71'];
+const HAIR_STYLES = ['flat','spiky','swept','mohawk','dome'];
+let hairColorIdx = 0;
+let hairStyleIdx = 0;
+
+function drawAgentHabbo(agent) {
+  const pos = toScreen(agent.x, agent.y);
+  const sx = pos.x, sy = pos.y;
+  const f = agent.facing;
+  const walking = agent.path.length > 0;
+  const frame = agent.walkFrame;
+  const breathe = agent.idle ? Math.sin(agent.idleTimer * 1.5) * 0.8 : 0;
+  const bodyBob = walking ? Math.sin(frame * Math.PI / 2) * 1.5 : breathe;
+  const legOffset = walking ? Math.sin(frame * Math.PI / 2) * 3 : 0;
+  const armSwing = walking ? Math.sin(frame * Math.PI / 2) * 3 : Math.sin(agent.idleTimer * 0.8) * 1;
+
+  // Assign hair if not set
+  if (!agent.hairColor) { agent.hairColor = HAIR_COLORS[hairColorIdx++ % HAIR_COLORS.length]; }
+  if (!agent.hairStyle) { agent.hairStyle = HAIR_STYLES[hairStyleIdx++ % HAIR_STYLES.length]; }
+
+  ctx.save();
+  ctx.translate(sx, sy);
+
+  // Glow
+  if (agent.glowAlpha > 0) {
+    const ga = Math.floor(agent.glowAlpha * 60).toString(16).padStart(2,'0');
+    ctx.beginPath(); ctx.arc(0, -16, 28, 0, Math.PI*2);
+    ctx.fillStyle = agent.color + ga; ctx.fill();
+  }
+
+  // Shadow
+  ctx.beginPath(); ctx.ellipse(0, 5, 11, 4, 0, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fill();
+
+  // Feet
+  const feetY = 0 + bodyBob;
+  drawBlock(ctx, -6+legOffset*0.3, feetY, 5, 3, '#2c3e50');
+  drawBlock(ctx, 1-legOffset*0.3, feetY, 5, 3, '#2c3e50');
+
+  // Legs
+  const legY = feetY - 7;
+  drawBlock(ctx, -5+legOffset*0.4, legY, 4, 7, darkenColor(agent.color, 30));
+  drawBlock(ctx, 1-legOffset*0.4, legY, 4, 7, darkenColor(agent.color, 30));
+
+  // Torso
+  const torsoY = legY - 11 + bodyBob;
+  drawBlock(ctx, -7, torsoY, 14, 11, agent.color);
+  drawBlock(ctx, -4, torsoY+2, 8, 6, lightenColor(agent.color, 25), false);
+  drawBlock(ctx, -7, torsoY+9, 14, 2, darkenColor(agent.color, 40), false);
+
+  // Arms
+  const armY = torsoY + 1;
+  drawBlock(ctx, -10, armY+armSwing, 4, 9, agent.color);
+  drawBlock(ctx, 7, armY-armSwing, 4, 9, agent.color);
+  drawBlock(ctx, -10, armY+9+armSwing, 4, 3, agent.skin, false);
+  drawBlock(ctx, 7, armY+9-armSwing, 4, 3, agent.skin, false);
+
+  // Head (WIDER than torso = Habbo signature)
+  const headY = torsoY - 14 + bodyBob;
+  drawBlock(ctx, -8, headY, 16, 13, agent.skin);
+  drawBlock(ctx, -9, headY+4, 2, 4, agent.skin, false);
+  drawBlock(ctx, 7, headY+4, 2, 4, agent.skin, false);
+
+  // Eyes
+  if (!agent.blinking) {
+    const ex1 = f > 0 ? -4 : -2, ex2 = f > 0 ? 2 : 0;
+    drawBlock(ctx, ex1, headY+5, 3, 3, '#1a1a2e', false);
+    drawBlock(ctx, ex2, headY+5, 3, 3, '#1a1a2e', false);
+    drawBlock(ctx, ex1+1, headY+5, 1, 1, '#fff', false);
+    drawBlock(ctx, ex2+1, headY+5, 1, 1, '#fff', false);
+  } else {
+    const ex1 = f > 0 ? -4 : -2, ex2 = f > 0 ? 2 : 0;
+    drawBlock(ctx, ex1, headY+6, 3, 1, '#1a1a2e', false);
+    drawBlock(ctx, ex2, headY+6, 3, 1, '#1a1a2e', false);
+  }
+
+  // Mouth
+  if (agent.bubble) {
+    drawBlock(ctx, -2, headY+9, 4, 2, '#c0392b', false);
+  } else {
+    drawBlock(ctx, -1, headY+10, 3, 1, darkenColor(agent.skin, 40), false);
+  }
+
+  // Hair
+  const hc = agent.hairColor;
+  switch(agent.hairStyle) {
+    case 'flat':
+      drawBlock(ctx, -9, headY-4, 18, 5, hc);
+      drawBlock(ctx, -8, headY-2, 16, 3, hc, false); break;
+    case 'spiky':
+      drawBlock(ctx, -9, headY-3, 18, 4, hc);
+      drawBlock(ctx, -7, headY-7, 3, 4, hc);
+      drawBlock(ctx, -2, headY-9, 4, 6, hc);
+      drawBlock(ctx, 4, headY-6, 3, 3, hc); break;
+    case 'swept':
+      drawBlock(ctx, -9, headY-3, 18, 4, hc);
+      drawBlock(ctx, -9, headY-6, 10, 3, hc);
+      drawBlock(ctx, f>0?5:-9, headY-1, 4, 5, hc); break;
+    case 'mohawk':
+      drawBlock(ctx, -9, headY-2, 18, 3, hc);
+      drawBlock(ctx, -3, headY-10, 6, 8, lightenColor(hc, 30));
+      drawBlock(ctx, -2, headY-12, 4, 3, lightenColor(hc, 50)); break;
+    case 'dome':
+      drawBlock(ctx, -9, headY-4, 18, 5, hc);
+      drawBlock(ctx, -7, headY-7, 14, 4, hc);
+      drawBlock(ctx, -5, headY-9, 10, 3, lightenColor(hc, 20)); break;
+  }
+
+  // Name tag
+  const label = agent._labelText || agent.name.substring(0, 10);
+  const tw = agent.getLabelWidth(ctx);
+  ctx.imageSmoothingEnabled = true;
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(Math.round(-tw/2-5), headY-18, tw+10, 13);
+  ctx.strokeStyle = agent.color + '88';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(Math.round(-tw/2-5)+0.5, headY-18+0.5, tw+9, 12);
+  ctx.font = 'bold 9px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = agent.color;
+  ctx.fillText(label, 0, headY-8);
+  ctx.imageSmoothingEnabled = false;
+
+  ctx.restore();
+
+  if (agent.bubble) { drawBubble(agent, sx, sy - 55); }
+}
+
 // ── Speech bubble (with cached line wrapping) ──
 function drawBubble(agent, x, y) {
   const text = agent.bubble;
