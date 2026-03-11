@@ -749,10 +749,10 @@ function drawAgentHabbo(agent) {
   const f = agent.facing;
   const walking = agent.path.length > 0;
   const frame = agent.walkFrame;
-  const breathe = agent.idle ? Math.sin(agent.idleTimer * 1.5) * 0.8 : 0;
-  const bodyBob = walking ? Math.sin(frame * Math.PI / 2) * 1.5 : breathe;
+  const breathe = agent.idle ? Math.sin(agent.idleTimer * 1.5) * 0.3 : 0;
+  const bodyBob = breathe; // NO bouncing while walking — adult composure
   const legOffset = walking ? Math.sin(frame * Math.PI / 2) * 3 : 0;
-  const armSwing = walking ? Math.sin(frame * Math.PI / 2) * 3 : Math.sin(agent.idleTimer * 0.8) * 1;
+  const armSwing = walking ? Math.sin(frame * Math.PI / 2) * 2 : Math.sin(agent.idleTimer * 0.8) * 0.5;
 
   // Assign hair if not set
   if (!agent.hairColor) { agent.hairColor = HAIR_COLORS[hairColorIdx++ % HAIR_COLORS.length]; }
