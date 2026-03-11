@@ -1216,16 +1216,17 @@ function renderAgentCards() {
     container.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px">No agents yet</div>';
     return;
   }
+  function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
   container.innerHTML = agentArr.map(a => {
     const roomLabel = ROOMS[a.room]?.label || a.room;
-    return `<div class="agent-card" style="border-left-color:${a.color}">
+    return `<div class="agent-card" style="border-left-color:${esc(a.color)}">
       <div class="agent-card-header">
-        <div class="agent-dot" style="background:${a.color}"></div>
-        <div class="agent-card-name">${a.name}</div>
-        <div class="agent-card-room">${roomLabel}</div>
+        <div class="agent-dot" style="background:${esc(a.color)}"></div>
+        <div class="agent-card-name">${esc(a.name)}</div>
+        <div class="agent-card-room">${esc(roomLabel)}</div>
       </div>
-      <div style="font-size:10px;color:var(--text-dim)">${a.role} | ${a.messageCount} msgs</div>
-      ${a.bubble ? `<div class="agent-card-bubble">"${a.bubble}"</div>` : ''}
+      <div style="font-size:10px;color:var(--text-dim)">${esc(a.role)} | ${a.messageCount} msgs</div>
+      ${a.bubble ? `<div class="agent-card-bubble">"${esc(a.bubble)}"</div>` : ''}
     </div>`;
   }).join('');
 }
