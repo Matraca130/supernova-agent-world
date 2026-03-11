@@ -295,6 +295,8 @@ Responde SOLO con texto markdown.`;
 
 module.exports = {
   CHECKPOINT_INSTRUCTIONS,
+  DIALOGUE_FRAMES,
+  getDialogueFrame,
   parseCheckpoint,
   buildFirstPrompt,
   buildDebatePrompt,
