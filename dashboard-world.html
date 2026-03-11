@@ -956,74 +956,93 @@ function drawAgentHabbo(agent) {
   if (agent.bubble) { drawBubble(agent, sx, sy - 65); }
 }
 
-// ── Speech bubble (with cached line wrapping) ──
+// ── Speech bubble PIXEL-ART (escalonado, dark blue, monospace) ──
 function drawBubble(agent, x, y) {
-  const text = agent.bubble;
-  const color = agent.color;
+  var text = agent.bubble;
 
   // Cache line wrapping
   if (!agent.bubbleLinesCache) {
-    ctx.font = '10px system-ui';
-    const maxW = 160;
-    const words = text.split(' ');
-    const lines = [];
-    let line = '';
-    for (const w of words) {
-      const test = line ? line + ' ' + w : w;
+    ctx.imageSmoothingEnabled = true;
+    ctx.font = '10px monospace';
+    var maxW = 150;
+    var words = text.split(' ');
+    var lines = [];
+    var line = '';
+    for (var wi = 0; wi < words.length; wi++) {
+      var test = line ? line + ' ' + words[wi] : words[wi];
       if (ctx.measureText(test).width > maxW) {
         if (line) lines.push(line);
-        line = w;
+        line = words[wi];
       } else {
         line = test;
       }
     }
     if (line) lines.push(line);
-    if (lines.length > 3) {
-      lines.length = 3;
-      lines[2] = lines[2].substring(0, lines[2].length - 3) + '...';
-    }
+    if (lines.length > 3) { lines.length = 3; lines[2] = lines[2].substring(0, lines[2].length - 3) + '...'; }
     agent.bubbleLinesCache = lines;
+    ctx.imageSmoothingEnabled = false;
   }
 
-  const lines = agent.bubbleLinesCache;
-  const lineH = 13;
-  const padX = 8, padY = 6;
-  const bw = 176; // maxW + padX*2
-  const bh = lines.length * lineH + padY * 2;
-  const bx = x - bw / 2;
-  const by = y - bh - 10;
+  var lines = agent.bubbleLinesCache;
+  var lineH = 13;
+  var padX = 8, padY = 6;
+  var bw = 170;
+  var bh = lines.length * lineH + padY * 2;
+  var bx = x - bw / 2;
+  var by = y - bh - 10;
 
-  // Fade effect near end
-  const alpha = agent.bubbleTimer < 1000 ? agent.bubbleTimer / 1000 : 1;
-
+  var alpha = agent.bubbleTimer < 1000 ? agent.bubbleTimer / 1000 : 1;
   ctx.save();
   ctx.globalAlpha = alpha;
+  ctx.imageSmoothingEnabled = true;
 
-  // Background
-  ctx.beginPath();
-  ctx.roundRect(bx, by, bw, bh, 6);
-  ctx.fillStyle = 'rgba(13,13,26,0.92)';
-  ctx.fill();
-  ctx.strokeStyle = color + '66';
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  // Pixel-art bubble body (stepped corners)
+  ctx.fillStyle = '#e8e8f0';
+  ctx.fillRect(Math.round(bx+2), Math.round(by), bw-4, bh);
+  ctx.fillRect(Math.round(bx), Math.round(by+2), bw, bh-4);
+  ctx.fillRect(Math.round(bx+1), Math.round(by+1), bw-2, bh-2);
 
-  // Tail
-  ctx.beginPath();
-  ctx.moveTo(x - 5, by + bh);
-  ctx.lineTo(x, by + bh + 8);
-  ctx.lineTo(x + 5, by + bh);
-  ctx.fillStyle = 'rgba(13,13,26,0.92)';
-  ctx.fill();
+  // Pixel border (1px black, stepped)
+  ctx.fillStyle = '#000';
+  ctx.fillRect(Math.round(bx+2), Math.round(by-1), bw-4, 1);   // top
+  ctx.fillRect(Math.round(bx+2), Math.round(by+bh), bw-4, 1);  // bottom
+  ctx.fillRect(Math.round(bx-1), Math.round(by+2), 1, bh-4);   // left
+  ctx.fillRect(Math.round(bx+bw), Math.round(by+2), 1, bh-4);  // right
+  // Corner steps
+  ctx.fillRect(Math.round(bx), Math.round(by), 2, 2);
+  ctx.fillRect(Math.round(bx+bw-2), Math.round(by), 2, 2);
+  ctx.fillRect(Math.round(bx), Math.round(by+bh-2), 2, 2);
+  ctx.fillRect(Math.round(bx+bw-2), Math.round(by+bh-2), 2, 2);
+  // Inner corner white to clean up
+  ctx.fillStyle = '#e8e8f0';
+  ctx.fillRect(Math.round(bx+1), Math.round(by+1), 1, 1);
+  ctx.fillRect(Math.round(bx+bw-2), Math.round(by+1), 1, 1);
+  ctx.fillRect(Math.round(bx+1), Math.round(by+bh-2), 1, 1);
+  ctx.fillRect(Math.round(bx+bw-2), Math.round(by+bh-2), 1, 1);
 
-  // Text
-  ctx.font = '10px system-ui';
-  ctx.fillStyle = '#ddd';
+  // Pixel tail (stepped triangle)
+  ctx.fillStyle = '#e8e8f0';
+  ctx.fillRect(Math.round(x-4), Math.round(by+bh), 8, 3);
+  ctx.fillRect(Math.round(x-2), Math.round(by+bh+3), 4, 2);
+  ctx.fillRect(Math.round(x-1), Math.round(by+bh+5), 2, 2);
+  // Tail border
+  ctx.fillStyle = '#000';
+  ctx.fillRect(Math.round(x-5), Math.round(by+bh), 1, 3);
+  ctx.fillRect(Math.round(x+4), Math.round(by+bh), 1, 3);
+  ctx.fillRect(Math.round(x-3), Math.round(by+bh+3), 1, 2);
+  ctx.fillRect(Math.round(x+2), Math.round(by+bh+3), 1, 2);
+  ctx.fillRect(Math.round(x-2), Math.round(by+bh+5), 1, 2);
+  ctx.fillRect(Math.round(x+1), Math.round(by+bh+5), 1, 2);
+
+  // Text (dark on light bubble)
+  ctx.font = '10px monospace';
+  ctx.fillStyle = '#1a1a2e';
   ctx.textAlign = 'left';
-  lines.forEach((l, i) => {
-    ctx.fillText(l, bx + padX, by + padY + 10 + i * lineH);
-  });
+  for (var li = 0; li < lines.length; li++) {
+    ctx.fillText(lines[li], bx + padX, by + padY + 10 + li * lineH);
+  }
 
+  ctx.imageSmoothingEnabled = false;
   ctx.restore();
 }
 
