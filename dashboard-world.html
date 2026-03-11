@@ -1004,24 +1004,67 @@ function drawIsoBox(gx, gy, gw, gh, elevation, fill, stroke) {
 }
 
 function drawFurniture() {
-  // Debate room: table
-  drawIsoBox(7.5, 3.5, 3, 2, 6, '#7c83ff20', '#7c83ff35');
-  // GitHub: monitors
-  for (let i = 0; i < 3; i++) {
-    drawIsoBox(14 + i * 1.3, 3.5, 0.8, 0.5, 8, '#4ade8018', '#4ade8030');
-    drawIsoBox(14 + i * 1.3, 4.2, 0.8, 0.8, 4, '#4ade8012', '#4ade8025'); // desks
+  // Debate room: table with visible legs
+  var tp = toScreen(8, 4);
+  drawBlock(ctx, tp.x-20, tp.y-8, 40, 5, '#5a60d0');
+  drawBlock(ctx, tp.x-18, tp.y-3, 3, 6, '#4a4fb0');
+  drawBlock(ctx, tp.x+15, tp.y-3, 3, 6, '#4a4fb0');
+
+  // GitHub room: server rack with LED indicators
+  var sp = toScreen(15, 3);
+  drawBlock(ctx, sp.x-5, sp.y-22, 16, 22, '#2d3436');
+  var t = Date.now();
+  for (var si = 0; si < 4; si++) {
+    var on = (t + si * 137) % 1000 > 400;
+    ctx.fillStyle = on ? '#4ade80' : '#2d3436';
+    ctx.fillRect(sp.x-2, sp.y-20+si*5, 3, 2);
+    ctx.fillStyle = on ? '#f87171' : '#2d3436';
+    ctx.fillRect(sp.x+4, sp.y-20+si*5, 3, 2);
   }
-  // Reason: book stacks
-  drawIsoBox(1, 3, 1.5, 0.6, 5, '#a78bfa18', '#a78bfa30');
-  drawIsoBox(1, 4, 1.5, 0.6, 3, '#a78bfa15', '#a78bfa28');
-  // Lounge: couch
-  drawIsoBox(7.5, 9.5, 3, 1, 5, '#f8717118', '#f8717130');
-  // Stats: dashboard screen
-  drawIsoBox(1, 9, 2, 0.3, 10, '#fdcb6e20', '#fdcb6e35');
-  drawIsoBox(1, 9.5, 2, 1, 4, '#fdcb6e12', '#fdcb6e25'); // desk
-  // KB: shelves
-  drawIsoBox(14, 9, 3, 0.5, 8, '#38bdf818', '#38bdf830');
-  drawIsoBox(14, 10, 3, 0.5, 5, '#38bdf815', '#38bdf828');
+
+  // Reason room: whiteboard with scribbles
+  var wb = toScreen(1, 3);
+  drawBlock(ctx, wb.x-2, wb.y-18, 24, 16, '#eee');
+  ctx.fillStyle = '#fff'; ctx.fillRect(wb.x, wb.y-16, 20, 12);
+  drawBlock(ctx, wb.x+8, wb.y-5, 3, 8, '#666');
+  ctx.strokeStyle = '#7c83ff44'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(wb.x+3, wb.y-13); ctx.lineTo(wb.x+17, wb.y-11); ctx.stroke();
+  ctx.strokeStyle = '#e1705544';
+  ctx.beginPath(); ctx.moveTo(wb.x+3, wb.y-9); ctx.lineTo(wb.x+14, wb.y-8); ctx.stroke();
+
+  // Lounge: couch with cushions
+  var cp = toScreen(8, 10);
+  drawBlock(ctx, cp.x-22, cp.y-6, 44, 8, '#c0392b');
+  drawBlock(ctx, cp.x-24, cp.y-10, 6, 12, '#a93226');
+  drawBlock(ctx, cp.x+18, cp.y-10, 6, 12, '#a93226');
+  ctx.fillStyle = '#e74c3c'; ctx.fillRect(cp.x-16, cp.y-8, 14, 5);
+  ctx.fillStyle = '#e74c3c'; ctx.fillRect(cp.x+2, cp.y-8, 14, 5);
+
+  // Stats room: monitor with chart
+  var dp = toScreen(2, 9.5);
+  drawBlock(ctx, dp.x-3, dp.y-20, 20, 14, '#2c3e50');
+  ctx.fillStyle = '#1a1a2e'; ctx.fillRect(dp.x-1, dp.y-18, 16, 10);
+  ctx.strokeStyle = '#fdcb6e'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(dp.x+1, dp.y-10); ctx.lineTo(dp.x+4, dp.y-14);
+  ctx.lineTo(dp.x+7, dp.y-12); ctx.lineTo(dp.x+10, dp.y-16);
+  ctx.lineTo(dp.x+13, dp.y-11); ctx.stroke();
+  drawBlock(ctx, dp.x+5, dp.y-6, 4, 6, '#34495e');
+  drawBlock(ctx, dp.x+2, dp.y, 10, 2, '#34495e');
+
+  // KB room: bookshelf with colored books
+  var bk = toScreen(14.5, 9.5);
+  drawBlock(ctx, bk.x-5, bk.y-16, 30, 3, '#8b4513');
+  drawBlock(ctx, bk.x-5, bk.y-8, 30, 3, '#8b4513');
+  drawBlock(ctx, bk.x-5, bk.y, 30, 3, '#8b4513');
+  var bc = ['#e17055','#6c5ce7','#00b894','#fdcb6e','#0984e3','#e84393','#00cec9','#d63031'];
+  for (var bi = 0; bi < 8; bi++) {
+    var bx = bk.x - 3 + bi * 3.3;
+    var shelf = bi < 4 ? 0 : 1;
+    var by = bk.y - 15 + shelf * 8;
+    var bh = 4 + ((bi * 7) % 3);
+    ctx.fillStyle = bc[bi]; ctx.fillRect(bx, by+(5-bh), 2.5, bh);
+  }
 }
 
 // =====================================================================
