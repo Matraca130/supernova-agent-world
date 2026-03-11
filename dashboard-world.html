@@ -814,37 +814,39 @@ function drawAgentHabbo(agent) {
   }
 
   // Shadow
-  ctx.beginPath(); ctx.ellipse(0, 5, 11, 4, 0, 0, Math.PI*2);
+  ctx.beginPath(); ctx.ellipse(0, 5, 13, 5, 0, 0, Math.PI*2);
   ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fill();
 
-  // Feet
-  const feetY = 0 + bodyBob;
-  drawBlock(ctx, -6+legOffset*0.3, feetY, 5, 3, '#2c3e50');
-  drawBlock(ctx, 1-legOffset*0.3, feetY, 5, 3, '#2c3e50');
+  // Feet (variable shoe color)
+  var feetY = 0 + bodyBob;
+  drawBlock(ctx, -6+legOffset*0.3, feetY, 5, 3, agent._shoeColor);
+  drawBlock(ctx, 1-legOffset*0.3, feetY, 5, 3, agent._shoeColor);
 
-  // Legs
-  const legY = feetY - 7;
-  drawBlock(ctx, -5+legOffset*0.4, legY, 4, 7, darkenColor(agent.color, 30));
-  drawBlock(ctx, 1-legOffset*0.4, legY, 4, 7, darkenColor(agent.color, 30));
+  // Legs (variable height)
+  var legY = feetY - lh;
+  drawBlock(ctx, -5+legOffset*0.4, legY, 4, lh, darkenColor(agent.color, 30));
+  drawBlock(ctx, 1-legOffset*0.4, legY, 4, lh, darkenColor(agent.color, 30));
 
-  // Torso
-  const torsoY = legY - 11 + bodyBob;
-  drawBlock(ctx, -7, torsoY, 14, 11, agent.color);
-  drawBlock(ctx, -4, torsoY+2, 8, 6, lightenColor(agent.color, 25), false);
-  drawBlock(ctx, -7, torsoY+9, 14, 2, darkenColor(agent.color, 40), false);
+  // Torso (variable width & height)
+  var torsoY = legY - th + bodyBob;
+  var halfSw = Math.floor(sw / 2);
+  drawBlock(ctx, -halfSw, torsoY, sw, th, agent.color);
+  drawBlock(ctx, -halfSw+3, torsoY+2, sw-6, th-4, lightenColor(agent.color, 20), false);
+  drawBlock(ctx, -halfSw, torsoY+th-2, sw, 2, darkenColor(agent.color, 40), false);
 
-  // Arms
-  const armY = torsoY + 1;
-  drawBlock(ctx, -10, armY+armSwing, 4, 9, agent.color);
-  drawBlock(ctx, 7, armY-armSwing, 4, 9, agent.color);
-  drawBlock(ctx, -10, armY+9+armSwing, 4, 3, agent.skin, false);
-  drawBlock(ctx, 7, armY+9-armSwing, 4, 3, agent.skin, false);
+  // Arms (scale with torso)
+  var armY = torsoY + 1;
+  var armH = th - 2;
+  drawBlock(ctx, -halfSw-3, armY+armSwing, 4, armH, agent.color);
+  drawBlock(ctx, halfSw-1, armY-armSwing, 4, armH, agent.color);
+  drawBlock(ctx, -halfSw-3, armY+armH+armSwing, 4, 3, agent.skin, false);
+  drawBlock(ctx, halfSw-1, armY+armH-armSwing, 4, 3, agent.skin, false);
 
-  // Head (WIDER than torso = Habbo signature)
-  const headY = torsoY - 14 + bodyBob;
-  drawBlock(ctx, -8, headY, 16, 13, agent.skin);
-  drawBlock(ctx, -9, headY+4, 2, 4, agent.skin, false);
-  drawBlock(ctx, 7, headY+4, 2, 4, agent.skin, false);
+  // Head (15px wide, adult proportions — body dominates)
+  var headY = torsoY - 13 + bodyBob;
+  drawBlock(ctx, -8, headY, 15, 12, agent.skin);
+  drawBlock(ctx, -9, headY+4, 2, 3, agent.skin, false);
+  drawBlock(ctx, 6, headY+4, 2, 3, agent.skin, false);
 
   // Eyes
   if (!agent.blinking) {
