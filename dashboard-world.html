@@ -848,69 +848,112 @@ function drawAgentHabbo(agent) {
   drawBlock(ctx, -9, headY+4, 2, 3, agent.skin, false);
   drawBlock(ctx, 6, headY+4, 2, 3, agent.skin, false);
 
-  // Eyes
+  // Eyes (adjusted for 15x12 head)
   if (!agent.blinking) {
-    const ex1 = f > 0 ? -4 : -2, ex2 = f > 0 ? 2 : 0;
-    drawBlock(ctx, ex1, headY+5, 3, 3, '#1a1a2e', false);
-    drawBlock(ctx, ex2, headY+5, 3, 3, '#1a1a2e', false);
-    drawBlock(ctx, ex1+1, headY+5, 1, 1, '#fff', false);
-    drawBlock(ctx, ex2+1, headY+5, 1, 1, '#fff', false);
+    var ex1 = f > 0 ? -4 : -2, ex2 = f > 0 ? 2 : 0;
+    drawBlock(ctx, ex1, headY+4, 3, 3, '#1a1a2e', false);
+    drawBlock(ctx, ex2, headY+4, 3, 3, '#1a1a2e', false);
+    drawBlock(ctx, ex1+1, headY+4, 1, 1, '#fff', false);
+    drawBlock(ctx, ex2+1, headY+4, 1, 1, '#fff', false);
   } else {
-    const ex1 = f > 0 ? -4 : -2, ex2 = f > 0 ? 2 : 0;
-    drawBlock(ctx, ex1, headY+6, 3, 1, '#1a1a2e', false);
-    drawBlock(ctx, ex2, headY+6, 3, 1, '#1a1a2e', false);
+    var ex1 = f > 0 ? -4 : -2, ex2 = f > 0 ? 2 : 0;
+    drawBlock(ctx, ex1, headY+5, 3, 1, '#1a1a2e', false);
+    drawBlock(ctx, ex2, headY+5, 3, 1, '#1a1a2e', false);
   }
 
   // Mouth
   if (agent.bubble) {
-    drawBlock(ctx, -2, headY+9, 4, 2, '#c0392b', false);
+    drawBlock(ctx, -2, headY+8, 4, 2, '#c0392b', false);
   } else {
-    drawBlock(ctx, -1, headY+10, 3, 1, darkenColor(agent.skin, 40), false);
+    drawBlock(ctx, -1, headY+9, 3, 1, darkenColor(agent.skin, 40), false);
   }
 
-  // Hair
-  const hc = agent.hairColor;
+  // Hair (8 styles including long, buzz, curly)
+  var hc = agent.hairColor;
   switch(agent.hairStyle) {
     case 'flat':
-      drawBlock(ctx, -9, headY-4, 18, 5, hc);
-      drawBlock(ctx, -8, headY-2, 16, 3, hc, false); break;
+      drawBlock(ctx, -9, headY-4, 17, 5, hc);
+      drawBlock(ctx, -8, headY-2, 15, 3, hc, false); break;
     case 'spiky':
-      drawBlock(ctx, -9, headY-3, 18, 4, hc);
+      drawBlock(ctx, -9, headY-3, 17, 4, hc);
       drawBlock(ctx, -7, headY-7, 3, 4, hc);
       drawBlock(ctx, -2, headY-9, 4, 6, hc);
       drawBlock(ctx, 4, headY-6, 3, 3, hc); break;
     case 'swept':
-      drawBlock(ctx, -9, headY-3, 18, 4, hc);
+      drawBlock(ctx, -9, headY-3, 17, 4, hc);
       drawBlock(ctx, -9, headY-6, 10, 3, hc);
-      drawBlock(ctx, f>0?5:-9, headY-1, 4, 5, hc); break;
+      drawBlock(ctx, f>0?4:-9, headY-1, 4, 5, hc); break;
     case 'mohawk':
-      drawBlock(ctx, -9, headY-2, 18, 3, hc);
+      drawBlock(ctx, -9, headY-2, 17, 3, hc);
       drawBlock(ctx, -3, headY-10, 6, 8, lightenColor(hc, 30));
       drawBlock(ctx, -2, headY-12, 4, 3, lightenColor(hc, 50)); break;
     case 'dome':
-      drawBlock(ctx, -9, headY-4, 18, 5, hc);
-      drawBlock(ctx, -7, headY-7, 14, 4, hc);
-      drawBlock(ctx, -5, headY-9, 10, 3, lightenColor(hc, 20)); break;
+      drawBlock(ctx, -9, headY-4, 17, 5, hc);
+      drawBlock(ctx, -7, headY-7, 13, 4, hc);
+      drawBlock(ctx, -5, headY-9, 9, 3, lightenColor(hc, 20)); break;
+    case 'long':
+      drawBlock(ctx, -9, headY-3, 17, 4, hc);
+      drawBlock(ctx, f>0?-9:3, headY+1, 5, 10, hc);
+      drawBlock(ctx, f>0?-9:3, headY+8, 4, 4, lightenColor(hc, 15)); break;
+    case 'buzz':
+      drawBlock(ctx, -8, headY-2, 15, 3, hc); break;
+    case 'curly':
+      drawBlock(ctx, -10, headY-5, 19, 6, hc);
+      drawBlock(ctx, -9, headY-3, 17, 5, lightenColor(hc, 15), false);
+      drawBlock(ctx, -10, headY+1, 3, 4, hc);
+      drawBlock(ctx, 6, headY+1, 3, 4, hc); break;
+  }
+
+  // Accessories (8 types)
+  switch(agent._accessory) {
+    case 'glasses':
+      drawBlock(ctx, -5, headY+3, 4, 3, '#333');
+      drawBlock(ctx, 0, headY+3, 4, 3, '#333');
+      drawBlock(ctx, -1, headY+4, 2, 1, '#333', false); break;
+    case 'scarf':
+      drawBlock(ctx, -halfSw, torsoY-1, sw, 3, '#e74c3c');
+      drawBlock(ctx, -halfSw-1, torsoY, 2, 5, '#c0392b'); break;
+    case 'badge':
+      drawBlock(ctx, halfSw-5, torsoY+3, 4, 4, '#f1c40f');
+      drawBlock(ctx, halfSw-4, torsoY+4, 2, 2, '#e67e22', false); break;
+    case 'hat':
+      drawBlock(ctx, -10, headY-8, 19, 4, darkenColor(hc, 30));
+      drawBlock(ctx, -7, headY-12, 13, 5, darkenColor(hc, 20)); break;
+    case 'antenna':
+      drawBlock(ctx, 0, headY-10, 1, 7, '#999');
+      drawBlock(ctx, -1, headY-12, 3, 3, '#4ade80'); break;
+    case 'eyepatch':
+      drawBlock(ctx, f>0?-5:1, headY+3, 5, 4, '#1a1a2e');
+      ctx.strokeStyle='#333'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(f>0?-5:6, headY+5); ctx.lineTo(f>0?-9:9, headY+1); ctx.stroke(); break;
+    case 'horns':
+      drawBlock(ctx, -8, headY-6, 3, 4, '#8b0000');
+      drawBlock(ctx, 4, headY-6, 3, 4, '#8b0000');
+      drawBlock(ctx, -7, headY-8, 2, 3, '#a00000');
+      drawBlock(ctx, 4, headY-8, 2, 3, '#a00000'); break;
   }
 
   // Name tag
-  const label = agent._labelText || agent.name.substring(0, 10);
-  const tw = agent.getLabelWidth(ctx);
+  var label = agent._labelText || agent.name.substring(0, 10);
+  var tw = agent.getLabelWidth(ctx);
   ctx.imageSmoothingEnabled = true;
   ctx.fillStyle = 'rgba(0,0,0,0.8)';
-  ctx.fillRect(Math.round(-tw/2-5), headY-18, tw+10, 13);
-  ctx.strokeStyle = agent.color + '88';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(Math.round(-tw/2-5)+0.5, headY-18+0.5, tw+9, 12);
-  ctx.font = 'bold 9px monospace';
-  ctx.textAlign = 'center';
+  ctx.fillRect(Math.round(-tw/2-5), headY-20, tw+10, 13);
+  ctx.strokeStyle = agent.color + '88'; ctx.lineWidth = 1;
+  ctx.strokeRect(Math.round(-tw/2-5)+0.5, headY-20+0.5, tw+9, 12);
+  ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
   ctx.fillStyle = agent.color;
-  ctx.fillText(label, 0, headY-8);
+  ctx.fillText(label, 0, headY-10);
   ctx.imageSmoothingEnabled = false;
 
   ctx.restore();
 
-  if (agent.bubble) { drawBubble(agent, sx, sy - 55); }
+  // Dragon companion
+  if (agent._hasDragon) {
+    drawDragon(ctx, sx + f * 18, sy - 5, agent.idleTimer);
+  }
+
+  if (agent.bubble) { drawBubble(agent, sx, sy - 65); }
 }
 
 // ── Speech bubble (with cached line wrapping) ──
