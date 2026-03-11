@@ -224,6 +224,49 @@ function measureArgumentQuality(response, participantNames = []) {
 }
 
 /**
+ * Mide calidad de pensamiento estructurado en checkpoints.
+ * Diseñado para maximizar las capacidades de Claude Opus 4.6.
+ * @param {Object} checkpoint — checkpoint parseado de parseCheckpoint()
+ * @returns {number} 0-1
+ */
+function measureStructuredThought(checkpoint) {
+  if (!checkpoint || !checkpoint.structured) return 0;
+  let score = 0;
+
+  // 1. Reasoning chain depth (proportional to length)
+  const chain = checkpoint.reasoning_chain;
+  if (Array.isArray(chain) && chain.length > 0) {
+    if (chain.length >= 5) score += 0.30;
+    else if (chain.length >= 3) score += 0.22;
+    else score += 0.15;
+  }
+
+  // 2. Builds on other agents (explicit cross-referencing)
+  const builds = checkpoint.builds_on;
+  if (Array.isArray(builds) && builds.length > 0) {
+    score += 0.20;
+  }
+
+  // 3. Confidence declaration (epistemic transparency)
+  if (typeof checkpoint.confidence === 'number') {
+    score += 0.15;
+  }
+
+  // 4. Uncertainty areas (epistemic honesty — Claude Opus 4.6 is more reliable when declaring unknowns)
+  const uncertainty = checkpoint.uncertainty_areas;
+  if (Array.isArray(uncertainty) && uncertainty.length > 0) {
+    score += 0.20;
+  }
+
+  // 5. Meta-observation (process reflection, min 20 chars to avoid trivial responses)
+  if (typeof checkpoint.meta_observation === 'string' && checkpoint.meta_observation.length >= 20) {
+    score += 0.15;
+  }
+
+  return Math.min(score, 1.0);
+}
+
+/**
  * Puntúa una respuesta completa con composite ponderado y innovation shield.
  * @param {string} response
  * @param {string} topic
@@ -253,6 +296,20 @@ async function scoreResponse(response, topic, agentName, round, speakingOrder, p
   if (innovationShield) {
     composite = Math.min(composite + 0.15, 1.0);
   }
+
+  // ── Opus Depth Bonus: reward deep reasoning patterns from Claude Opus 4.6 ──
+  let opusDepthBonus = 0;
+  const depthPatterns = [
+    /\b(on one hand|por un lado).{10,200}?(on the other|por otro)/gis,
+    /\b(however|sin embargo|no obstante).{10,200}?(therefore|por lo tanto|entonces)/gis,
+    /\b(initially|inicialmente).{10,200}?(but after|pero despues|al reconsiderar)/gis,
+    /\b(if we consider|si consideramos).{10,200}?(then|entonces)/gis,
+    /\b(the tradeoff|el tradeoff|el compromiso).{5,100}?(is|es|between|entre)/gis,
+  ];
+  for (const pattern of depthPatterns) {
+    if (pattern.test(response)) opusDepthBonus += 0.03;
+  }
+  composite = Math.min(composite + opusDepthBonus, 1.0);
 
   return {
     agentName,
@@ -353,6 +410,30 @@ function sanitizeParticipantNames(names) {
   return names.map(n => n.replace(/[^a-zA-Z0-9-_]/g, ''));
 }
 
+/**
+ * Genera instruccion de feedback personalizada para mejorar la proxima respuesta.
+ * Diseñado para Claude Opus 4.6: feedback accionable, no punitivo.
+ * @param {Object} score — objeto retornado por scoreResponse
+ * @returns {string} Instruccion de feedback (vacio si score es bueno)
+ */
+function generateFeedbackInstruction(score) {
+  if (score.composite >= 0.7) return ''; // Already good
+  const tips = [];
+  if (score.argumentQuality < 0.3) {
+    tips.push('MEJORA: Responde DIRECTAMENTE a lo que dijo otro agente por nombre. Usa "estoy de acuerdo con X porque..." o "discrepo con Y porque..."');
+  }
+  if (score.concreteness < 0.3) {
+    tips.push('MEJORA: Incluye al menos 2 ejemplos concretos, datos numericos, o referencias a archivos/funciones especificas.');
+  }
+  if (score.novelty < 0.25) {
+    tips.push('MEJORA: Aporta una perspectiva que NADIE ha mencionado. Preguntate: que falta en esta discusion?');
+  }
+  if (score.relevance < 0.3) {
+    tips.push('MEJORA: Conecta tu respuesta explicitamente con el tema del debate. Usa las palabras clave del topic.');
+  }
+  return tips.length > 0 ? '\n\nFEEDBACK DEL SISTEMA:\n' + tips.join('\n') : '';
+}
+
 module.exports = {
   measureRelevance,
   measureNovelty,
@@ -361,6 +442,8 @@ module.exports = {
   measureArgumentQuality,
   scoreResponse,
   getRejectReason,
+  generateFeedbackInstruction,
   sanitizeAgentOutput,
   sanitizeParticipantNames,
+  detectAnomaly,
 };
