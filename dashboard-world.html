@@ -493,37 +493,37 @@ function toScreen(gx, gy) {
 // =====================================================================
 
 function drawRoom(room) {
+  // Checkerboard floor — individual tiles with 2 tones
+  for (let gx = room.x; gx < room.x + room.w; gx++) {
+    for (let gy = room.y; gy < room.y + room.h; gy++) {
+      const tc = [toScreen(gx, gy), toScreen(gx+1, gy), toScreen(gx+1, gy+1), toScreen(gx, gy+1)];
+      const isLight = (gx + gy) % 2 === 0;
+      ctx.beginPath();
+      ctx.moveTo(tc[0].x, tc[0].y);
+      for (let i = 1; i < 4; i++) ctx.lineTo(tc[i].x, tc[i].y);
+      ctx.closePath();
+      ctx.fillStyle = isLight ? room.color + '22' : room.color + '12';
+      ctx.fill();
+      ctx.strokeStyle = room.color + '35';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+  }
+
+  // Room border
   const corners = [
     toScreen(room.x, room.y),
     toScreen(room.x + room.w, room.y),
     toScreen(room.x + room.w, room.y + room.h),
     toScreen(room.x, room.y + room.h),
   ];
-
-  // Floor
   ctx.beginPath();
   ctx.moveTo(corners[0].x, corners[0].y);
   for (let i = 1; i < 4; i++) ctx.lineTo(corners[i].x, corners[i].y);
   ctx.closePath();
-  ctx.fillStyle = room.color + '18';
-  ctx.fill();
-  ctx.strokeStyle = room.color + '55';
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = room.color + '66';
+  ctx.lineWidth = 2;
   ctx.stroke();
-
-  // Grid lines
-  ctx.strokeStyle = room.color + '15';
-  ctx.lineWidth = 0.5;
-  for (let gx = room.x + 1; gx < room.x + room.w; gx++) {
-    const a = toScreen(gx, room.y);
-    const b = toScreen(gx, room.y + room.h);
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-  }
-  for (let gy = room.y + 1; gy < room.y + room.h; gy++) {
-    const a = toScreen(room.x, gy);
-    const b = toScreen(room.x + room.w, gy);
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-  }
 
   // Walls (isometric depth — back two walls)
   const wallH = 12;
