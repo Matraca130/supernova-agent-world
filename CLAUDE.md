@@ -16,6 +16,7 @@ dashboard-world.html  — Vista isometrica 2D con agentes animados en habitacion
 test-suite.cjs        — 115 tests automatizados
 embeddings.cjs        — Auto-embeddings con OpenAI text-embedding-3-small
 orchestrator-engine.cjs — Motor autónomo de debates (OpenAI API, sin depender de Figma Make)
+triage-agent.cjs      — Agente Triage (clasificación de complejidad, 6 agentes especializados)
 embeddings.json       — Vector store (auto-generado)
 .env                  — API keys (no commitear)
 debates.json          — Estado persistente
@@ -37,7 +38,7 @@ SessionTypes.cjs      — Tipos y validadores (Checkpoint, ActionItem, SessionMe
 | `/sse` | SSE MCP endpoint |
 | `/api/orchestrator/events` | SSE stream for autonomous debate events |
 
-### MCP Tools (36 total)
+### MCP Tools (38 total)
 **Debate:** iniciar_debate, unirse, decir, leer, avanzar_ronda, finalizar, debates, estado, roles
 **KB:** agregar_contexto, consultar_fuente, banco
 **Orchestration:** turno, ronda_completa, decir_lote, run_debate
@@ -46,6 +47,7 @@ SessionTypes.cjs      — Tipos y validadores (Checkpoint, ActionItem, SessionMe
 **Code Proposals:** read_project_file, list_project_files, propose_edit, review_proposal, apply_proposal, revert_proposal, list_proposals, run_tests
 **Governance:** governance_status
 **Embeddings:** buscar_similar, embedding_stats
+**Triage:** evaluar_tarea, equipo
 **System:** health_check
 
 ### Situaciones Disponibles (5)
@@ -64,6 +66,13 @@ SessionTypes.cjs      — Tipos y validadores (Checkpoint, ActionItem, SessionMe
 - Real-time events via `/api/orchestrator/events` (SSE)
 - Safety caps: 20 rounds max, 10-minute timeout
 - Repetition detection via Jaccard similarity
+
+### 6-Agent Team
+- Arquitecto, Frontend Dev, Backend Dev, QA Engineer, Security Analyst, Triage Coordinator
+- `evaluar_tarea` classifies tasks as simple/medium/complex
+- Simple: direct instructions, 1 agent
+- Medium: quick 2-3 agent consultation (3 rounds)
+- Complex: full autonomous debate (4-6 agents, 10 rounds)
 
 ## IMPORTANT: Multi-Agent Development Pattern
 

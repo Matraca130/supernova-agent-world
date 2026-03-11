@@ -34,6 +34,7 @@ const dm = require('./debate-manager.cjs');
 const validators = require('./validators.cjs');
 const sgTools = require('./sub-groups-tools.cjs');
 const orchestrator = require('./orchestrator-engine.cjs');
+const triage = require('./triage-agent.cjs');
 
 // ── Parse args ──────────────────────────────────────────────────────────
 
@@ -226,6 +227,132 @@ Ver detalles completos en /dashboard-v2 o /api/orchestrator/events`,
           }],
         };
       }
+    }
+  );
+
+  // ── EVALUAR_TAREA (triage inteligente) ──────────────────────────────
+  server.tool(
+    'evaluar_tarea',
+    `🧠 TRIAGE INTELIGENTE — Describe qué necesitas hacer y el sistema decide el mejor approach.
+
+SIMPLE → Te da instrucciones directas (1 agente lo resuelve)
+MEDIO → Consulta rápida entre 2-3 agentes especializados (3 rondas)
+COMPLEJO → Debate completo autónomo con 4-6 agentes (10 rondas)
+
+EQUIPO DE 6 AGENTES:
+🏗️ Arquitecto — diseño de sistemas, patterns, decisiones técnicas
+⚛️ Frontend Dev — React, TypeScript, UI/UX, Tailwind
+🔧 Backend Dev — Supabase, Edge Functions, API, database
+🧪 QA Engineer — tests, edge cases, validación
+🔒 Security Analyst — auth, XSS, injection, OWASP
+🧠 Triage Coordinator — evalúa complejidad, coordina
+
+El sistema automáticamente:
+1. Clasifica la complejidad de tu tarea
+2. Selecciona los agentes relevantes
+3. Si es complejo, abre debate autónomo
+4. Te retorna el plan de acción o resultado del debate`,
+    {
+      descripcion: z.string().describe('Descripción de la tarea que necesitas hacer (cuanto más detalle, mejor la clasificación)'),
+      forzar_debate: z.boolean().optional().default(false).describe('Forzar debate grupal aunque la tarea sea simple'),
+      model: z.string().optional().default('gpt-4o-mini').describe('Modelo OpenAI para la evaluación'),
+    },
+    async ({ descripcion, forzar_debate, model }) => {
+      try {
+        if (forzar_debate) {
+          // Force full debate
+          const result = await triage.runTriagedTask(descripcion, { forceDebate: true, model });
+          const synth = result.result?.synthesis
+            ? result.result.synthesis.substring(0, 800) + (result.result.synthesis.length > 800 ? '...' : '')
+            : '(sin síntesis)';
+          return { content: [{ type: 'text', text: `🔥 DEBATE FORZADO — ${result.decision.agents?.join(', ') || 'equipo completo'}
+
+Debate ID: ${result.result?.debateId || 'N/A'}
+Mensajes: ${result.result?.messages?.length || 0}
+Rondas: ${result.result?.rounds || 0}
+Duración: ${((result.result?.duration || 0) / 1000).toFixed(1)}s
+
+📝 SÍNTESIS:
+${synth}` }] };
+        }
+
+        const result = await triage.runTriagedTask(descripcion, { model });
+
+        // Format based on decision type
+        if (result.decision.action === 'direct') {
+          return { content: [{ type: 'text', text: `✅ TAREA SIMPLE — Agente: ${result.decision.agent}
+
+${result.decision.instructions || result.decision.direct_action}
+
+Razón: ${result.decision.reason}` }] };
+        }
+
+        if (result.decision.action === 'consult') {
+          // Medium - debate was run with 2-3 agents
+          const synth = result.result?.synthesis
+            ? result.result.synthesis.substring(0, 500) + (result.result.synthesis.length > 500 ? '...' : '')
+            : '(sin síntesis)';
+          return { content: [{ type: 'text', text: `🔄 CONSULTA RÁPIDA — ${result.decision.agents.join(', ')}
+
+Debate ID: ${result.result?.debateId || 'N/A'}
+Mensajes: ${result.result?.messages?.length || 0}
+Rondas: ${result.result?.rounds || 0}
+Duración: ${((result.result?.duration || 0) / 1000).toFixed(1)}s
+
+📝 RESULTADO:
+${synth}
+
+Razón del triage: ${result.decision.reason}` }] };
+        }
+
+        if (result.decision.action === 'debate') {
+          const synth = result.result?.synthesis
+            ? result.result.synthesis.substring(0, 800) + (result.result.synthesis.length > 800 ? '...' : '')
+            : '(sin síntesis)';
+          return { content: [{ type: 'text', text: `🔥 DEBATE COMPLETO — ${result.decision.agents?.join(', ') || 'equipo completo'}
+
+Situación: ${result.decision.situacion}
+Debate ID: ${result.result?.debateId || 'N/A'}
+Mensajes: ${result.result?.messages?.length || 0}
+Rondas: ${result.result?.rounds || 0}
+Duración: ${((result.result?.duration || 0) / 1000).toFixed(1)}s
+
+📝 SÍNTESIS Y PLAN DE ACCIÓN:
+${synth}
+
+Razón del triage: ${result.decision.reason}` }] };
+        }
+
+        // Fallback
+        return { content: [{ type: 'text', text: `🧠 Evaluación: ${JSON.stringify(result.decision, null, 2)}` }] };
+
+      } catch (err) {
+        return { content: [{ type: 'text', text: `❌ Error en triage: ${err.message}` }] };
+      }
+    }
+  );
+
+  // ── EQUIPO (muestra agentes) ──────────────────────────────────────────
+  server.tool(
+    'equipo',
+    `👥 Muestra el equipo de 6 agentes especializados y sus capacidades.
+Útil para saber quién puede ayudar con qué.`,
+    {},
+    async () => {
+      const team = triage.TEAM_AGENTS;
+      const lines = [
+        '👥 EQUIPO DE AGENTES ESPECIALIZADOS',
+        '═══════════════════════════════════════',
+        '',
+      ];
+      team.forEach(a => {
+        const icons = { arquitecto: '🏗️', frontend: '⚛️', backend: '🔧', qa: '🧪', seguridad: '🔒', triage: '🧠' };
+        lines.push(`${icons[a.id] || '🤖'} ${a.name} (${a.id})`);
+        lines.push(`   ${a.specialty}`);
+        lines.push('');
+      });
+      lines.push('Usa "evaluar_tarea" para que el Triage decida quién trabaja en tu tarea.');
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
     }
   );
 
@@ -1957,7 +2084,7 @@ poll();setInterval(poll,1500);
         messages: activeDebate.messages.length,
         round: `${activeDebate.currentRound}/${activeDebate.maxRounds || 'inf'}`,
       } : null,
-      tools: ['onboarding','run_debate','iniciar_debate','unirse','decir','leer','avanzar_ronda','votar_finalizar','finalizar','debates','estado','roles','agregar_contexto','consultar_fuente','banco','turno','ronda_completa','decir_lote','situaciones','situacion','workflow_status','read_project_file','list_project_files','propose_edit','review_proposal','apply_proposal','revert_proposal','list_proposals','run_tests','governance_status','buscar_similar','embedding_stats','health_check'],
+      tools: ['onboarding','evaluar_tarea','equipo','run_debate','iniciar_debate','unirse','decir','leer','avanzar_ronda','votar_finalizar','finalizar','debates','estado','roles','agregar_contexto','consultar_fuente','banco','turno','ronda_completa','decir_lote','situaciones','situacion','workflow_status','read_project_file','list_project_files','propose_edit','review_proposal','apply_proposal','revert_proposal','list_proposals','run_tests','governance_status','buscar_similar','embedding_stats','health_check'],
     });
   });
 

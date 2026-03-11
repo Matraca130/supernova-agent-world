@@ -1586,6 +1586,65 @@ test('orchestrator-engine exports runDebate', () => {
   assertTrue(Object.keys(orch).includes('runDebate'), 'Module should export runDebate');
 });
 
+// ═════════════════════════════════════════════════════════════════════════════
+// 11. TRIAGE AGENT TESTS
+// ═════════════════════════════════════════════════════════════════════════════
+
+console.log('\n\n11. TRIAGE AGENT TESTS\n');
+
+// Fresh triage agent load
+function freshTriageAgent() {
+  const resolved = require.resolve('./triage-agent.cjs');
+  delete require.cache[resolved];
+  return require('./triage-agent.cjs');
+}
+
+console.log('\nTesting: Triage agent exports');
+
+test('triage-agent exports required functions', () => {
+  const triage = freshTriageAgent();
+  assertTrue(typeof triage.evaluateTask === 'function', 'evaluateTask should be a function');
+  assertTrue(typeof triage.runTriagedTask === 'function', 'runTriagedTask should be a function');
+  assertTrue(Array.isArray(triage.TEAM_AGENTS), 'TEAM_AGENTS should be an array');
+  assertTrue(typeof triage.getTeamStatus === 'function', 'getTeamStatus should be a function');
+});
+
+console.log('\nTesting: TEAM_AGENTS data');
+
+test('TEAM_AGENTS has 6 agents', () => {
+  const triage = freshTriageAgent();
+  assertEqual(triage.TEAM_AGENTS.length, 6, 'TEAM_AGENTS should have 6 agents');
+});
+
+test('TEAM_AGENTS has required agent IDs', () => {
+  const triage = freshTriageAgent();
+  const ids = triage.TEAM_AGENTS.map(a => a.id);
+  const requiredIds = ['arquitecto', 'frontend', 'backend', 'qa', 'seguridad', 'triage'];
+  for (const id of requiredIds) {
+    assertTrue(ids.includes(id), `TEAM_AGENTS should include agent with id "${id}"`);
+  }
+});
+
+test('Each agent has required fields', () => {
+  const triage = freshTriageAgent();
+  for (const agent of triage.TEAM_AGENTS) {
+    assertTrue(typeof agent.id === 'string', `Agent should have string id, got ${typeof agent.id}`);
+    assertTrue(typeof agent.name === 'string', `Agent ${agent.id} should have string name`);
+    assertTrue(typeof agent.specialty === 'string', `Agent ${agent.id} should have string specialty`);
+    assertTrue(Array.isArray(agent.triggers), `Agent ${agent.id} should have triggers array`);
+  }
+});
+
+console.log('\nTesting: getTeamStatus');
+
+test('getTeamStatus returns team info', () => {
+  const triage = freshTriageAgent();
+  const status = triage.getTeamStatus();
+  assertTrue(Array.isArray(status), 'getTeamStatus should return an array');
+  assertEqual(status.length, 6, 'Status should have 6 entries');
+  assertTrue(status[0].id && status[0].name && status[0].specialty, 'Each entry should have id, name, specialty');
+});
+
 console.log('\nTesting: Orchestrator input validation');
 
 asyncTest('runDebate rejects without tema', async () => {
