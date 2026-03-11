@@ -1001,7 +1001,7 @@ test('All situaciones have maxRounds defined', () => {
   const dm = freshDebateManager();
   const situaciones = dm.listSituaciones();
   for (const sit of situaciones) {
-    assertTrue(sit.maxRounds > 0, `${sit.id} should have maxRounds > 0`);
+    assertTrue(sit.maxRounds >= 0, `${sit.id} should have maxRounds defined (0 = continuous)`);
   }
 });
 
@@ -1420,7 +1420,7 @@ test('Situacion mejora_codigo has correct roles', () => {
   assertTrue(mejora, 'mejora_codigo situacion should exist');
   const roles = mejora.roles;
   assertTrue(Array.isArray(roles), 'mejora_codigo should have a roles array');
-  assertEqual(roles.length, 5, 'mejora_codigo should have exactly 5 roles');
+  assertEqual(roles.length, 6, 'mejora_codigo should have exactly 6 roles');
   const roleIds = roles.map(r => r.id || r.role || r);
   assertTrue(
     roleIds.some(r => r.includes('analista-codigo')),
@@ -1560,30 +1560,110 @@ test('reviewProposal prevents duplicate reviews', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// SUMMARY
+// 10. ORCHESTRATOR ENGINE TESTS
 // ═════════════════════════════════════════════════════════════════════════════
 
-console.log('\n\n' + '='.repeat(80));
-console.log('TEST RESULTS SUMMARY');
-console.log('='.repeat(80));
+console.log('\n\n10. ORCHESTRATOR ENGINE TESTS\n');
 
-console.log(`\nTotal Tests: ${totalTests}`);
-console.log(`Passed: ${passedTests} ✓`);
-console.log(`Failed: ${failedTests} ✗`);
-
-const passPercentage = totalTests > 0 ? Math.round((passedTests / totalTests) * 100) : 0;
-console.log(`Pass Rate: ${passPercentage}%`);
-
-if (failedTests > 0) {
-  console.log('\nFailed Tests:');
-  for (const detail of failedTestDetails) {
-    console.log(`  ✗ ${detail.name}`);
-    console.log(`    Error: ${detail.error}`);
-  }
+// Fresh orchestrator load
+function freshOrchestrator() {
+  const resolved = require.resolve('./orchestrator-engine.cjs');
+  delete require.cache[resolved];
+  return require('./orchestrator-engine.cjs');
 }
 
-console.log('\n' + '='.repeat(80));
-console.log(passPercentage === 100 ? 'ALL TESTS PASSED!' : 'Some tests failed. See details above.');
-console.log('='.repeat(80));
+// Async test helper: wraps an async fn so the sync test() runner can handle it
+function asyncTest(name, fn) {
+  asyncTestQueue.push({ name, fn });
+}
+const asyncTestQueue = [];
 
-process.exit(failedTests > 0 ? 1 : 0);
+console.log('\nTesting: Orchestrator exports');
+
+test('orchestrator-engine exports runDebate', () => {
+  const orch = freshOrchestrator();
+  assertTrue(typeof orch.runDebate === 'function', 'runDebate should be a function');
+  assertTrue(Object.keys(orch).includes('runDebate'), 'Module should export runDebate');
+});
+
+console.log('\nTesting: Orchestrator input validation');
+
+asyncTest('runDebate rejects without tema', async () => {
+  resetState();
+  const orch = freshOrchestrator();
+  let caught = false;
+  let errorMsg = '';
+  try {
+    await orch.runDebate({});
+  } catch (err) {
+    caught = true;
+    errorMsg = err.message;
+  }
+  assertTrue(caught, 'runDebate should throw when tema is missing');
+  assertTrue(errorMsg.includes('tema'), 'Error message should mention tema: got "' + errorMsg + '"');
+});
+
+asyncTest('runDebate rejects with invalid situacion', async () => {
+  resetState();
+  const orch = freshOrchestrator();
+  let caught = false;
+  let errorMsg = '';
+  try {
+    await orch.runDebate({ tema: 'test', situacion: 'nonexistent' });
+  } catch (err) {
+    caught = true;
+    errorMsg = err.message;
+  }
+  assertTrue(caught, 'runDebate should throw when situacion is invalid');
+  assertTrue(
+    errorMsg.includes('nonexistent') || errorMsg.includes('no existe') || errorMsg.includes('Failed to create'),
+    'Error should mention invalid situacion: got "' + errorMsg + '"'
+  );
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SUMMARY (deferred to handle async tests)
+// ═════════════════════════════════════════════════════════════════════════════
+
+async function runAsyncTestsAndReport() {
+  // Run queued async tests
+  for (const t of asyncTestQueue) {
+    totalTests++;
+    try {
+      await t.fn();
+      passedTests++;
+      console.log(`✓ ${t.name}`);
+    } catch (err) {
+      failedTests++;
+      console.log(`✗ ${t.name}`);
+      failedTestDetails.push({ name: t.name, error: err.message });
+    }
+  }
+
+  console.log('\n\n' + '='.repeat(80));
+  console.log('TEST RESULTS SUMMARY');
+  console.log('='.repeat(80));
+
+  console.log(`\nTotal Tests: ${totalTests}`);
+  console.log(`Passed: ${passedTests} ✓`);
+  console.log(`Failed: ${failedTests} ✗`);
+
+  const passPercentage = totalTests > 0 ? Math.round((passedTests / totalTests) * 100) : 0;
+  console.log(`Pass Rate: ${passPercentage}%`);
+
+  if (failedTests > 0) {
+    console.log('\nFailed Tests:');
+    for (const detail of failedTestDetails) {
+      console.log(`  ✗ ${detail.name}`);
+      console.log(`    Error: ${detail.error}`);
+    }
+  }
+
+  console.log('\n' + '='.repeat(80));
+  console.log(passPercentage === 100 ? 'ALL TESTS PASSED!' : 'Some tests failed. See details above.');
+  console.log('='.repeat(80));
+
+  process.exit(failedTests > 0 ? 1 : 0);
+}
+
+runAsyncTestsAndReport();

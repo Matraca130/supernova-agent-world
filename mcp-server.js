@@ -33,6 +33,7 @@ const require = createRequire(import.meta.url);
 const dm = require('./debate-manager.cjs');
 const validators = require('./validators.cjs');
 const sgTools = require('./sub-groups-tools.cjs');
+const orchestrator = require('./orchestrator-engine.cjs');
 
 // ── Parse args ──────────────────────────────────────────────────────────
 
@@ -52,9 +53,181 @@ function parseArgs() {
   return { mode, port };
 }
 
+// Active orchestrations for SSE streaming
+const activeOrchestrations = new Map();
+const orchClients = new Set();
+
+function broadcastOrchEvent(event) {
+  const data = JSON.stringify(event);
+  for (const client of orchClients) {
+    client.write(`data: ${data}\n\n`);
+  }
+}
+
 // ── Registrar tools en un McpServer ──────────────────────────────────────
 
 function registerTools(server) {
+
+  // ── ONBOARDING ──────────────────────────────────────────────────────
+  server.tool(
+    'onboarding',
+    `🚀 LLAMA ESTO PRIMERO. Te asigna un rol automáticamente en el debate activo.
+Recibirás: tu rol, qué hacer, qué tools usar, estado actual del debate.
+Solo necesitas dar tu nombre — el sistema hace el resto.
+Si no hay debate activo, te dice cómo crear uno.`,
+    {
+      agent_name: z.string().describe('Tu nombre único (ej: "claude-opus-1", "gemini-pro", "gpt4-review")'),
+    },
+    async ({ agent_name }) => {
+      const result = dm.onboarding(agent_name);
+      if (result.error) {
+        return { content: [{ type: 'text', text: `❌ ${result.error}\n${result.suggestion || ''}` }] };
+      }
+      const lines = [
+        `🚀 ONBOARDING COMPLETO`,
+        `═══════════════════════════════════════`,
+        `Nombre: ${result.agent_name}`,
+        `Rol: ${result.role}`,
+        `Descripción: ${result.role_description}`,
+        ``,
+        `📋 Debate: ${result.debate_id}`,
+        `Tema: ${result.topic}`,
+        `Fase: ${result.phase}`,
+        `Ronda: ${result.round}`,
+        `Intensidad: ${result.intensity}`,
+        ``,
+        `🛠️ Tus herramientas: ${result.tools_to_use.join(', ')}`,
+        ``,
+        `⚡ ACCIÓN INMEDIATA:`,
+        result.immediate_action,
+        ``,
+        `👥 Otros participantes: ${result.other_participants.length ? result.other_participants.join(', ') : 'ninguno aún'}`,
+        `🪑 Roles disponibles: ${result.available_roles_remaining.length ? result.available_roles_remaining.join(', ') : 'todos asignados'}`,
+        ``,
+        `🏛️ Gobernanza:`,
+        `  Aprobaciones necesarias: ${result.governance.min_approvals}`,
+        `  Roles obligatorios: ${result.governance.mandatory_roles.join(', ')}`,
+        `  Roles con veto: ${result.governance.veto_roles.join(', ')}`,
+        ``,
+        `📊 Propuestas: ${result.pending_proposals} pendientes, ${result.approved_proposals} aprobadas`,
+      ];
+      if (result.phase_instruction) {
+        lines.push(``, `📌 Instrucción de fase: ${result.phase_instruction}`);
+      }
+      lines.push(``, `🔄 IMPORTANTE: Usa "run_debate" para lanzar un debate autónomo completo en el servidor, o usa "decir" para participar manualmente en el debate.`);
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
+    }
+  );
+
+  // ── RUN_DEBATE (orquestación autónoma) ─────────────────────────────
+  server.tool(
+    'run_debate',
+    `🚀 EJECUTA UN DEBATE AUTÓNOMO COMPLETO en el servidor.
+Una sola llamada ejecuta TODO el debate: crea agentes, genera mensajes via OpenAI API, avanza rondas, y genera síntesis.
+NO requiere que los agentes llamen tools repetidamente — el servidor hace todo.
+
+Ideal para: debates largos, análisis profundos, mejora de código.
+El debate corre en background y puedes ver el progreso en /dashboard-v2 o /api/orchestrator/events.`,
+    {
+      situacion: z.enum(['libre', 'identificar_problemas', 'arquitectura', 'ejecucion', 'mejora_codigo']).default('libre').describe('Tipo de situación/workflow'),
+      tema: z.string().describe('El tema a debatir'),
+      num_agents: z.number().optional().default(4).describe('Número de agentes (2-15)'),
+      max_rounds: z.number().optional().default(10).describe('Máximo de rondas (0=auto-detect by repetition)'),
+      model: z.string().optional().default('gpt-4o-mini').describe('Modelo OpenAI a usar'),
+    },
+    async ({ situacion, tema, num_agents, max_rounds, model }) => {
+      const debateId = `orch-${Date.now()}`;
+      const startTime = Date.now();
+
+      activeOrchestrations.set(debateId, {
+        id: debateId,
+        status: 'running',
+        tema,
+        situacion,
+        startTime,
+        messages: [],
+      });
+
+      broadcastOrchEvent({
+        type: 'debate_started',
+        timestamp: new Date().toISOString(),
+        data: { debateId, tema, situacion, num_agents, max_rounds, model },
+      });
+
+      try {
+        const config = {
+          debateId,
+          situacion,
+          tema,
+          numAgents: num_agents,
+          maxRounds: max_rounds,
+          model,
+          onMessage: (msg) => {
+            const orch = activeOrchestrations.get(debateId);
+            if (orch) orch.messages.push(msg);
+            broadcastOrchEvent({
+              type: 'message',
+              timestamp: new Date().toISOString(),
+              data: { debateId, ...msg },
+            });
+          },
+        };
+
+        const result = await orchestrator.runDebate(config);
+
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+        const orch = activeOrchestrations.get(debateId);
+        if (orch) orch.status = 'completed';
+
+        broadcastOrchEvent({
+          type: 'debate_completed',
+          timestamp: new Date().toISOString(),
+          data: { debateId, duration, totalMessages: result.totalMessages, rounds: result.rounds },
+        });
+
+        const synthesisPreview = result.synthesis
+          ? result.synthesis.substring(0, 300) + (result.synthesis.length > 300 ? '...' : '')
+          : '(sin síntesis)';
+
+        return {
+          content: [{
+            type: 'text',
+            text: `🏁 DEBATE AUTÓNOMO COMPLETADO
+
+Debate ID: ${debateId}
+Tema: "${tema}"
+Situación: ${situacion}
+Modelo: ${model}
+Agentes: ${num_agents}
+Rondas completadas: ${result.rounds || 'N/A'}
+Total mensajes: ${result.totalMessages || 0}
+Duración: ${duration}s
+
+📝 SÍNTESIS:
+${synthesisPreview}
+
+Ver detalles completos en /dashboard-v2 o /api/orchestrator/events`,
+          }],
+        };
+      } catch (err) {
+        const orch = activeOrchestrations.get(debateId);
+        if (orch) orch.status = 'error';
+
+        broadcastOrchEvent({
+          type: 'debate_error',
+          timestamp: new Date().toISOString(),
+          data: { debateId, error: err.message },
+        });
+
+        return {
+          content: [{
+            type: 'text',
+            text: `❌ Error en debate autónomo: ${err.message}\nDebate ID: ${debateId}`,
+          }],
+        };
+      }
+    }
+  );
 
   // ── INICIAR DEBATE ─────────────────────────────────────────────────
   server.tool(
@@ -303,10 +476,29 @@ Si tu mensaje es rechazado por ser muy corto, reescríbelo con más detalle y ev
     }
   );
 
+  // ── VOTAR FINALIZAR ──────────────────────────────────────────────
+  server.tool(
+    'votar_finalizar',
+    `🗳️ Vota para finalizar el debate. Se necesita CONSENSO de 2/3 de los participantes.
+Cuando estés satisfecho con los cambios realizados, vota para terminar.
+Cuando se alcance el consenso, el coordinador-merge puede llamar "finalizar".`,
+    {
+      debate_id: z.string().describe('ID del debate'),
+      nombre: z.string().describe('Tu nombre de agente'),
+      razon: z.string().optional().describe('Por qué consideras que se puede finalizar'),
+    },
+    async ({ debate_id, nombre, razon }) => {
+      const result = dm.voteFinish(debate_id, nombre, razon || '');
+      if (result.error) return { content: [{ type: 'text', text: `❌ ${result.error}` }] };
+      return { content: [{ type: 'text', text: `🗳️ ${result.message}\n\nVotos: ${result.voters.join(', ')}` }] };
+    }
+  );
+
   // ── FINALIZAR ─────────────────────────────────────────────────────
   server.tool(
     'finalizar',
-    'Cierra el debate con síntesis. Guarda un markdown con todo el historial, fases, y reglas.',
+    `🏁 Cierra el debate con síntesis. REQUIERE consenso previo: 2/3 de los agentes deben haber votado con "votar_finalizar".
+Si no hay consenso suficiente, será rechazado.`,
     {
       debate_id: z.string().describe('ID del debate'),
       sintesis: z.string().optional().describe('Síntesis final del debate'),
@@ -314,13 +506,14 @@ Si tu mensaje es rechazado por ser muy corto, reescríbelo con más detalle y ev
     async ({ debate_id, sintesis }) => {
       const result = dm.finishDebate(debate_id, sintesis);
       if (result.error) {
-        return { content: [{ type: 'text', text: `Error: ${result.error}` }] };
+        const extra = result.voters ? `\nVotos actuales: ${result.voters.join(', ')}` : '';
+        return { content: [{ type: 'text', text: `❌ ${result.error}${extra}` }] };
       }
       const parts = result.debate.participants.map(p => `${p.name} (${p.role})`).join(', ');
       return {
         content: [{
           type: 'text',
-          text: `🏁 Debate "${result.debate.topic}" finalizado.\nMensajes: ${result.debate.messages.length}\nRondas: ${result.debate.currentRound}\nParticipantes: ${parts}\nGuardado en: ${result.savedTo}`,
+          text: `🏁 Debate "${result.debate.topic}" finalizado por CONSENSO.\nMensajes: ${result.debate.messages.length}\nRondas: ${result.debate.currentRound}\nParticipantes: ${parts}\nGuardado en: ${result.savedTo}`,
         }],
       };
     }
@@ -1489,6 +1682,30 @@ async function startHttp(port) {
     res.json({ proposal: prop });
   });
 
+  // ── Orchestrator SSE events ──────────────────────────────────────
+  app.get('/api/orchestrator/events', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    orchClients.add(res);
+    req.on('close', () => orchClients.delete(res));
+  });
+
+  app.get('/api/orchestrator/status', (req, res) => {
+    const orchestrations = [];
+    for (const [id, orch] of activeOrchestrations) {
+      orchestrations.push({
+        id: orch.id,
+        status: orch.status,
+        tema: orch.tema,
+        situacion: orch.situacion,
+        messageCount: orch.messages.length,
+        duration: ((Date.now() - orch.startTime) / 1000).toFixed(1) + 's',
+      });
+    }
+    res.json({ orchestrations });
+  });
+
   // ── Dashboard ─────────────────────────────────────────────────────
   app.get('/dashboard', (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1740,7 +1957,7 @@ poll();setInterval(poll,1500);
         messages: activeDebate.messages.length,
         round: `${activeDebate.currentRound}/${activeDebate.maxRounds || 'inf'}`,
       } : null,
-      tools: ['iniciar_debate','unirse','decir','leer','avanzar_ronda','finalizar','debates','estado','roles','agregar_contexto','consultar_fuente','banco','turno','ronda_completa','decir_lote','situaciones','situacion','workflow_status','read_project_file','list_project_files','propose_edit','review_proposal','apply_proposal','revert_proposal','list_proposals','run_tests','governance_status','buscar_similar','embedding_stats','health_check'],
+      tools: ['onboarding','run_debate','iniciar_debate','unirse','decir','leer','avanzar_ronda','votar_finalizar','finalizar','debates','estado','roles','agregar_contexto','consultar_fuente','banco','turno','ronda_completa','decir_lote','situaciones','situacion','workflow_status','read_project_file','list_project_files','propose_edit','review_proposal','apply_proposal','revert_proposal','list_proposals','run_tests','governance_status','buscar_similar','embedding_stats','health_check'],
     });
   });
 

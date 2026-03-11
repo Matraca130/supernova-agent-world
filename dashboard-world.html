@@ -837,28 +837,51 @@ function getAgentRoom(agentName, debate) {
   const spoken = debate.spokenThisRound || [];
   const agent = participants.find(p => p.name === agentName);
   const role = agent?.role || '';
+  const phase = debate.currentPhase || '';
 
-  // Last speaker -> debate room
-  if (msgs.length > 0 && msgs[msgs.length - 1].name === agentName) return 'debate';
+  // How recently did this agent speak? (index from end)
+  let lastSpokeIndex = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].participantName === agentName) { lastSpokeIndex = msgs.length - 1 - i; break; }
+  }
 
-  // Second-to-last speaker -> reason (just finished, reflecting)
-  if (msgs.length > 1 && msgs[msgs.length - 2].name === agentName) return 'reason';
+  // Currently speaking (last message is theirs) → Sala Debate
+  if (lastSpokeIndex === 0) return 'debate';
 
-  // Hasn't spoken yet this round -> waiting rooms based on role
-  if (!spoken.includes(agentName)) {
-    // Roles that research/analyze go to KB or stats
-    if (role.includes('analista') || role.includes('datos') || role.includes('optimizador')) return 'stats';
-    if (role.includes('investigador') || role.includes('historiador') || role.includes('esceptico')) return 'kb';
-    if (role.includes('arquitecto') || role.includes('integrador') || role.includes('dev')) return 'github';
-    // Others chill in lounge
+  // Just spoke (1-2 msgs ago) → Razonamiento (reflecting on responses)
+  if (lastSpokeIndex >= 1 && lastSpokeIndex <= 2) return 'reason';
+
+  // Phase-based assignment
+  if (phase === 'VEREDICTO' || phase === 'APLICACIÓN') return 'stats';
+  if (phase === 'ANÁLISIS') {
+    if (role.includes('analista')) return 'github';
+    if (role.includes('arquitecto')) return 'reason';
+    return 'kb';
+  }
+  if (phase === 'PROPUESTAS') {
+    if (role.includes('proponedor') || role.includes('implement')) return 'github';
+    if (role.includes('arquitecto')) return 'reason';
+    return 'lounge';
+  }
+  if (phase === 'REVISIÓN') {
+    if (role.includes('revisor') || role.includes('seguridad') || role.includes('calidad')) return 'reason';
+    if (role.includes('coordinador')) return 'stats';
     return 'lounge';
   }
 
-  // Spoke this round -> go to reasoning
-  if (spoken.includes(agentName)) return 'reason';
+  // Hasn't spoken this round → role-based waiting room
+  if (!spoken.includes(agentName)) {
+    if (role.includes('analista') || role.includes('proponedor') || role.includes('implement') || role.includes('dev') || role.includes('codigo')) return 'github';
+    if (role.includes('arquitecto') || role.includes('estrateg') || role.includes('revisor')) return 'reason';
+    if (role.includes('coordinador') || role.includes('datos') || role.includes('optimizador') || role.includes('priorizador')) return 'stats';
+    if (role.includes('investigador') || role.includes('historiador') || role.includes('contexto') || role.includes('doc')) return 'kb';
+    // Debate roles go to debate room
+    if (role.includes('critic') || role.includes('abogado') || role.includes('antagonist') || role.includes('escep')) return 'debate';
+    return 'lounge';
+  }
 
-  // VEREDICTO phase -> stats
-  if (debate.currentPhase === 'VEREDICTO') return 'stats';
+  // Spoke this round, waiting for others → Razonamiento
+  if (spoken.includes(agentName)) return 'reason';
 
   return 'lounge';
 }

@@ -15,6 +15,7 @@ dashboard-v2.html     — Dashboard con session management, drawer, stats
 dashboard-world.html  — Vista isometrica 2D con agentes animados en habitaciones
 test-suite.cjs        — 115 tests automatizados
 embeddings.cjs        — Auto-embeddings con OpenAI text-embedding-3-small
+orchestrator-engine.cjs — Motor autónomo de debates (OpenAI API, sin depender de Figma Make)
 embeddings.json       — Vector store (auto-generado)
 .env                  — API keys (no commitear)
 debates.json          — Estado persistente
@@ -34,11 +35,12 @@ SessionTypes.cjs      — Tipos y validadores (Checkpoint, ActionItem, SessionMe
 | `/api/proposals` | Lista propuestas de codigo |
 | `/mcp` | StreamableHTTP MCP endpoint |
 | `/sse` | SSE MCP endpoint |
+| `/api/orchestrator/events` | SSE stream for autonomous debate events |
 
 ### MCP Tools (36 total)
 **Debate:** iniciar_debate, unirse, decir, leer, avanzar_ronda, finalizar, debates, estado, roles
 **KB:** agregar_contexto, consultar_fuente, banco
-**Orchestration:** turno, ronda_completa, decir_lote
+**Orchestration:** turno, ronda_completa, decir_lote, run_debate
 **Situaciones:** situaciones, situacion, workflow_status
 **Sub-groups:** (via sub-groups-tools.cjs)
 **Code Proposals:** read_project_file, list_project_files, propose_edit, review_proposal, apply_proposal, revert_proposal, list_proposals, run_tests
@@ -54,6 +56,14 @@ SessionTypes.cjs      — Tipos y validadores (Checkpoint, ActionItem, SessionMe
 | `arquitectura` | Arquitectura de solucion | Propuestas → Cross-exam → Refinamiento → Decision |
 | `ejecucion` | Ejecucion coordinada | Coordinador → Implementador → Revisor → QA |
 | `mejora_codigo` | Mejora de codigo | Analista → Proponedor → Revisores → Coordinador aplica |
+
+### Server-Side Orchestration
+- `run_debate` tool triggers autonomous debate execution via OpenAI API
+- Server generates all agent responses (gpt-4o-mini by default)
+- No dependency on Figma Make for the debate loop
+- Real-time events via `/api/orchestrator/events` (SSE)
+- Safety caps: 20 rounds max, 10-minute timeout
+- Repetition detection via Jaccard similarity
 
 ## IMPORTANT: Multi-Agent Development Pattern
 
@@ -123,6 +133,7 @@ node test-suite.cjs
 - Proposals use path-jail security: only files within __dirname allowed
 - dashboard-world.html uses Canvas 2D with isometric projection, pixel-art agents, idle animations
 - dashboard-v2.html has session drawer, session info bar, session stats, polling every 3s/10s
+- ESTÉTICA: Siempre estilo Roblox — personajes pixel-art blocky, colores vibrantes, proporciones cuadradas. Toda UI visual del proyecto debe mantener esta identidad. No cambiar a estilos realistas, flat, o minimalistas.
 
 ## Running the Server
 ```bash

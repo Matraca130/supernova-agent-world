@@ -677,11 +677,68 @@ function nextRound(debateId, force = false) {
 }
 
 /**
- * Finaliza un debate con síntesis
+ * Vota para finalizar el debate. Se necesita consenso (2/3 de participantes).
  */
-function finishDebate(debateId, synthesis = null) {
+function voteFinish(debateId, agentName, reason = '') {
   const debate = state.debates[debateId];
   if (!debate) return { error: `Debate ${debateId} no existe` };
+  if (debate.status === 'finished') return { error: 'Debate ya terminó' };
+
+  const participant = debate.participants.find(p => p.name === agentName);
+  if (!participant) return { error: `${agentName} no es participante de este debate` };
+
+  if (!debate.finishVotes) debate.finishVotes = [];
+
+  // Check if already voted
+  if (debate.finishVotes.find(v => v.name === agentName)) {
+    return { error: `${agentName} ya votó para finalizar` };
+  }
+
+  debate.finishVotes.push({ name: agentName, role: participant.role, reason, at: new Date().toISOString() });
+  saveState();
+
+  const totalParticipants = debate.participants.length;
+  const needed = Math.ceil(totalParticipants * 2 / 3); // 2/3 consensus
+  const current = debate.finishVotes.length;
+  const ready = current >= needed;
+
+  return {
+    vote_registered: true,
+    agent: agentName,
+    votes: current,
+    needed,
+    total_participants: totalParticipants,
+    ready_to_finish: ready,
+    voters: debate.finishVotes.map(v => `${v.name} (${v.role})`),
+    missing: needed - current,
+    message: ready
+      ? `CONSENSO ALCANZADO (${current}/${totalParticipants}). El coordinador-merge puede llamar "finalizar" ahora.`
+      : `Voto registrado. Faltan ${needed - current} voto(s) más para consenso (${current}/${needed} necesarios).`,
+  };
+}
+
+/**
+ * Finaliza un debate con síntesis. Requiere consenso previo (2/3 de votos).
+ */
+function finishDebate(debateId, synthesis = null, _skipConsensus = false) {
+  const debate = state.debates[debateId];
+  if (!debate) return { error: `Debate ${debateId} no existe` };
+
+  // Check consensus (skip for debates with <=2 participants or when bypassed)
+  if (!_skipConsensus && debate.participants.length > 2) {
+    if (!debate.finishVotes) debate.finishVotes = [];
+    const totalParticipants = debate.participants.length;
+    const needed = Math.ceil(totalParticipants * 2 / 3);
+
+    if (debate.finishVotes.length < needed) {
+      return {
+        error: `CONSENSO INSUFICIENTE: ${debate.finishVotes.length}/${needed} votos. Los agentes deben usar "votar_finalizar" primero.`,
+        votes: debate.finishVotes.length,
+        needed,
+        voters: debate.finishVotes.map(v => `${v.name} (${v.role})`),
+      };
+    }
+  }
 
   debate.status = 'finished';
   if (synthesis) debate.synthesis = synthesis;
@@ -1104,8 +1161,9 @@ const SITUACIONES = {
     desc: 'Debate abierto sin template — los roles se auto-detectan según el tema. Equivalente al antiguo orquestar_debate.',
     icon: '🔥',
     intensity: 'adversarial',
-    maxRounds: 10,
+    maxRounds: 0,
     minWords: 150,
+    minExchangesPerRound: 2,
     roles: null, // null = auto-detectar con suggestRoles()
     phases: null, // null = usar fases por defecto según maxRounds
     rules: null,  // null = usar reglas por defecto según intensidad
@@ -1121,8 +1179,9 @@ const SITUACIONES = {
     desc: 'Análisis exhaustivo de errores, bugs, y problemas en código/sistema. Los agentes trabajan en secuencia: detectar → analizar → priorizar → proponer fix.',
     icon: '🔍',
     intensity: 'adversarial',
-    maxRounds: 12,
+    maxRounds: 0,
     minWords: 150,
+    minExchangesPerRound: 2,
     roles: [
       { role: 'detector-errores', desc: 'Escanea el código/sistema y LISTA cada error, bug, warning, code smell que encuentre. Nada se le escapa.', order: 1 },
       { role: 'analista-raiz', desc: 'Para CADA error detectado, investiga la CAUSA RAÍZ. No acepta explicaciones superficiales. Siempre pregunta "¿pero por qué?"', order: 2 },
@@ -1161,8 +1220,9 @@ const SITUACIONES = {
     desc: 'Diseño técnico de una solución. Los agentes debaten la mejor arquitectura considerando: escalabilidad, mantenimiento, costo, y velocidad de entrega.',
     icon: '🏗️',
     intensity: 'adversarial',
-    maxRounds: 12,
+    maxRounds: 0,
     minWords: 150,
+    minExchangesPerRound: 2,
     roles: [
       { role: 'arquitecto-sistema', desc: 'Diseña la arquitectura ideal: componentes, interfaces, flujos de datos. Piensa en 5 años. No le importa si es complejo.', order: 1 },
       { role: 'pragmatico-delivery', desc: 'SOLO acepta lo que se puede entregar en 2 sprints. Cada abstracción extra es un enemigo. "Ship it."', order: 2 },
@@ -1198,8 +1258,9 @@ const SITUACIONES = {
     desc: 'Implementación real con coordinación en tiempo real. Un agente implementa, otro revisa, otro coordina, otro arquitecta. Flujo tipo pull-request con revisión continua.',
     icon: '⚡',
     intensity: 'adversarial',
-    maxRounds: 16,
-    minWords: 120,
+    maxRounds: 0,
+    minWords: 150,
+    minExchangesPerRound: 2,
     roles: [
       { role: 'implementador', desc: 'ESCRIBE el código. Crea la rama, hace los cambios, reporta progreso. Su trabajo es ENTREGAR código que funcione.', order: 1 },
       { role: 'revisor-codigo', desc: 'REVISA cada cambio del implementador. Busca bugs, code smells, violaciones de estándares. NO aprueba sin al menos 1 observación.', order: 2 },
@@ -1237,23 +1298,29 @@ const SITUACIONES = {
 
   mejora_codigo: {
     name: 'MEJORA DE CÓDIGO',
-    desc: 'Los agentes analizan código del proyecto, proponen mejoras, las debaten, y si hay consenso se aplican en un branch. Flujo: analizar → proponer → debatir → aplicar.',
+    desc: 'Los agentes analizan código del proyecto, proponen mejoras, las debaten, y si hay consenso se aplican en un branch. Flujo: analizar → proponer → debatir → aplicar. CICLO CONTINUO: después de aplicar, vuelve a analizar para encontrar más mejoras.',
     icon: '🛠️',
     intensity: 'adversarial',
-    maxRounds: 12,
-    minWords: 100,
+    maxRounds: 0,
+    minWords: 150,
+    minExchangesPerRound: 2,
     roles: [
       { role: 'analista-codigo', desc: 'Lee y analiza archivos del proyecto. Detecta problemas de performance, bugs, code smells, y oportunidades de mejora. Usa read_project_file para leer código.', order: 1 },
-      { role: 'proponedor-mejora', desc: 'Propone cambios concretos con old_string/new_string. Cada propuesta debe tener razón clara y ser mínima. Usa propose_edit para crear propuestas.', order: 2 },
-      { role: 'revisor-seguridad', desc: 'Revisa cada propuesta buscando: vulnerabilidades, breaking changes, edge cases no contemplados. RECHAZA propuestas inseguras con review_proposal.', order: 3 },
-      { role: 'revisor-calidad', desc: 'Evalúa: legibilidad, mantenibilidad, consistencia con el estilo existente. Aprueba o rechaza con justificación técnica.', order: 4 },
-      { role: 'coordinador-merge', desc: 'Decide cuándo aplicar propuestas aprobadas. Ejecuta tests. Si fallan, revierte. Reporta el resultado final.', order: 5 },
+      { role: 'arquitecto-guardian', desc: 'Piensa en el diseño global. Aprueba o veta propuestas según impacto arquitectónico. Su aprobación es OBLIGATORIA para aplicar cualquier cambio.', order: 2 },
+      { role: 'proponedor-mejora', desc: 'Propone cambios concretos con old_string/new_string. Cada propuesta debe tener razón clara y ser mínima. Usa propose_edit para crear propuestas.', order: 3 },
+      { role: 'revisor-seguridad', desc: 'Revisa cada propuesta buscando: vulnerabilidades, breaking changes, edge cases no contemplados. RECHAZA propuestas inseguras con review_proposal. Su aprobación es OBLIGATORIA.', order: 4 },
+      { role: 'revisor-calidad', desc: 'Evalúa: legibilidad, mantenibilidad, consistencia con el estilo existente. Aprueba o rechaza con justificación técnica.', order: 5 },
+      { role: 'coordinador-merge', desc: 'Decide cuándo aplicar propuestas aprobadas. Ejecuta tests. Si fallan, revierte. Reporta el resultado final.', order: 6 },
     ],
     phases: [
-      { name: 'ANÁLISIS', desc: 'Los analistas leen el código y detectan issues.', instruction: 'Usa read_project_file para leer archivos. Lista TODOS los problemas encontrados con archivo, línea, y descripción. Sé exhaustivo.', rounds: [1, 3] },
-      { name: 'PROPUESTAS', desc: 'Se crean propuestas concretas de cambio.', instruction: 'Usa propose_edit para proponer cambios. Cada propuesta: archivo, old_string, new_string, razón. Las propuestas deben ser MÍNIMAS y enfocadas.', rounds: [4, 7] },
-      { name: 'REVISIÓN', desc: 'Los revisores evalúan cada propuesta.', instruction: 'Usa review_proposal para aprobar o rechazar. CADA revisión debe tener justificación técnica. Busca: bugs, seguridad, breaking changes, estilo.', rounds: [8, 10] },
-      { name: 'APLICACIÓN', desc: 'Se aplican las propuestas aprobadas y se corren tests.', instruction: 'El coordinador usa apply_proposal para aplicar propuestas aprobadas. Luego run_tests. Si fallan, revert_proposal. Reporta estado final.', rounds: [11, 12] },
+      { name: 'ANÁLISIS', desc: 'Los analistas leen el código y detectan issues.', instruction: 'Usa read_project_file y list_project_files para leer TODOS los archivos relevantes. Lista CADA problema con archivo, línea, descripción, y severidad. Sé exhaustivo — lee múltiples archivos.', rounds: [1, 4] },
+      { name: 'PROPUESTAS', desc: 'Se crean propuestas concretas de cambio.', instruction: 'Crea MÚLTIPLES propuestas con propose_edit. Cada propuesta: archivo, old_string exacto, new_string, razón detallada. Propuestas MÍNIMAS y enfocadas — una por issue.', rounds: [5, 10] },
+      { name: 'REVISIÓN', desc: 'Los revisores evalúan cada propuesta.', instruction: 'Revisa TODAS las propuestas pendientes con review_proposal. CADA revisión necesita justificación técnica detallada. El arquitecto-guardian y revisor-seguridad DEBEN revisar cada una.', rounds: [11, 16] },
+      { name: 'APLICACIÓN', desc: 'Se aplican propuestas aprobadas y se corren tests.', instruction: 'El coordinador aplica TODAS las propuestas aprobadas con apply_proposal. Ejecuta run_tests después de cada aplicación. Si fallan, revert_proposal inmediatamente.', rounds: [17, 20] },
+      { name: 'ANÁLISIS-2', desc: 'Segundo ciclo: analizar el código post-cambios.', instruction: 'Re-analiza los archivos modificados. ¿Los cambios introdujeron nuevos problemas? ¿Hay más oportunidades? Lee con read_project_file.', rounds: [21, 24] },
+      { name: 'PROPUESTAS-2', desc: 'Segundo ciclo de propuestas.', instruction: 'Propón mejoras adicionales basadas en el segundo análisis. Usa propose_edit.', rounds: [25, 30] },
+      { name: 'REVISIÓN-2', desc: 'Segundo ciclo de revisión.', instruction: 'Revisa las nuevas propuestas. Sé más estricto — el código ya fue mejorado una vez.', rounds: [31, 36] },
+      { name: 'APLICACIÓN-2', desc: 'Segundo ciclo de aplicación.', instruction: 'Aplica propuestas aprobadas del segundo ciclo. Corre tests completos. Reporta estado final del proyecto.', rounds: [37, 40] },
     ],
     rules: [
       'SOLO proponer cambios en archivos que hayas LEÍDO con read_project_file.',
@@ -1266,13 +1333,14 @@ const SITUACIONES = {
     coordination: {
       type: 'pipeline',
       dependencies: {
-        'proponedor-mejora': ['analista-codigo'],
+        'analista-codigo': [],
+        'arquitecto-guardian': ['analista-codigo'],
+        'proponedor-mejora': ['analista-codigo', 'arquitecto-guardian'],
         'revisor-seguridad': ['proponedor-mejora'],
         'revisor-calidad': ['proponedor-mejora'],
-        'coordinador-merge': ['revisor-seguridad', 'revisor-calidad'],
-        'analista-codigo': [],
+        'coordinador-merge': ['arquitecto-guardian', 'revisor-seguridad', 'revisor-calidad'],
       },
-      flowDescription: 'Analista lee código → Proponedor crea propuestas → Revisores evalúan → Coordinador aplica y corre tests.',
+      flowDescription: 'Analista lee código → Arquitecto evalúa diseño → Proponedor crea propuestas → Revisores evalúan → Coordinador aplica y corre tests.',
     },
   },
 };
@@ -1892,6 +1960,214 @@ function runProjectTests() {
   }
 }
 
+// ── ONBOARDING ──────────────────────────────────────────────────────
+// ── CONTINUAR — keeps agents engaged ────────────────────────────────
+function continuar(debateId, agentName) {
+  const debate = state.debates[debateId];
+  if (!debate) return { error: `Debate ${debateId} no existe` };
+  if (debate.status === 'finished') return { finished: true, message: 'Debate finalizado.' };
+
+  const participant = debate.participants.find(p => p.name === agentName);
+  if (!participant) return { error: `${agentName} no es participante. Usa "onboarding" primero.` };
+
+  const role = participant.role;
+  const phase = getCurrentPhase(debate.currentRound, debate.phases);
+  const phaseName = phase ? phase.name : 'LIBRE';
+  const phaseInstruction = phase ? phase.instruction : 'Debate libremente desde tu perspectiva.';
+  const spoken = debate.spokenThisRound || [];
+  const exchangeCount = (debate.exchangeCount || {})[agentName] || 0;
+  const minExchanges = debate.minExchangesPerRound || 1;
+  const hasSpokenEnough = exchangeCount >= minExchanges;
+
+  // Last 3 messages for context
+  const recentMsgs = debate.messages.slice(-3).map(m =>
+    `[${m.participantName} (${m.participantRole})]: ${m.text.slice(0, 150)}...`
+  );
+
+  // Pending proposals for this debate
+  const pendingProps = proposals.filter(p => p.debateId === debateId && p.status === 'pending');
+  const approvedProps = proposals.filter(p => p.debateId === debateId && p.status === 'approved');
+
+  // Determine what this agent should do RIGHT NOW
+  let action = '';
+  let tool = '';
+  let urgency = 'NORMAL';
+
+  if (!hasSpokenEnough) {
+    // Agent needs to speak
+    if (exchangeCount === 0) {
+      // First message this round
+      action = `DEBES hablar. Es tu turno. Fase: ${phaseName}. ${phaseInstruction} Responde a lo que dijeron los demás y argumenta FUERTE desde tu rol de ${role}. Mínimo 150 palabras.`;
+      tool = 'decir';
+      urgency = 'ALTA';
+    } else {
+      // Needs reply/rebuttal
+      action = `Ya hablaste ${exchangeCount} vez esta ronda pero necesitas ${minExchanges}. REPLICA a los argumentos de los demás. Objeta, cuestiona, profundiza. NO repitas lo mismo — agrega nueva evidencia o contraargumentos.`;
+      tool = 'decir';
+      urgency = 'ALTA';
+    }
+  } else if (role.includes('revisor') || role.includes('arquitecto-guardian')) {
+    if (pendingProps.length > 0) {
+      action = `Hay ${pendingProps.length} propuesta(s) pendientes de tu revisión. TU APROBACIÓN ES OBLIGATORIA. Revisa cada una con justificación técnica detallada.`;
+      tool = 'review_proposal';
+      urgency = 'CRÍTICA';
+    } else {
+      action = `No hay propuestas pendientes. Lee código con read_project_file o espera nuevas propuestas. Contribuye al debate con "decir".`;
+      tool = 'read_project_file';
+    }
+  } else if (role.includes('proponedor')) {
+    action = `Lee archivos con read_project_file y crea propuestas con propose_edit. Cada propuesta MÍNIMA y enfocada.`;
+    tool = 'read_project_file';
+  } else if (role.includes('coordinador')) {
+    if (approvedProps.length > 0) {
+      action = `Hay ${approvedProps.length} propuesta(s) aprobadas listas para aplicar. Aplícalas con apply_proposal y luego corre run_tests.`;
+      tool = 'apply_proposal';
+      urgency = 'ALTA';
+    } else {
+      action = `Monitorea el estado con list_proposals y governance_status. Cuando haya propuestas aprobadas, aplícalas.`;
+      tool = 'list_proposals';
+    }
+  } else if (role.includes('analista')) {
+    action = `Lee archivos del proyecto con read_project_file. Detecta problemas, bugs, oportunidades de mejora. Reporta con "decir".`;
+    tool = 'read_project_file';
+  } else {
+    action = `Contribuye al debate. Fase: ${phaseName}. ${phaseInstruction}`;
+    tool = 'decir';
+  }
+
+  // Agents waiting for others
+  const waitingFor = debate.participants
+    .filter(p => !spoken.includes(p.name))
+    .map(p => `${p.name} (${p.role})`);
+
+  return {
+    debate_id: debateId,
+    agent: agentName,
+    role,
+    round: debate.currentRound,
+    phase: phaseName,
+    urgency,
+    action,
+    next_tool: tool,
+    exchanges_this_round: `${exchangeCount}/${minExchanges}`,
+    has_spoken_enough: hasSpokenEnough,
+    recent_messages: recentMsgs,
+    waiting_for: waitingFor,
+    pending_proposals: pendingProps.length,
+    approved_proposals: approvedProps.length,
+    total_messages: debate.messages.length,
+    finish_votes: (debate.finishVotes || []).length,
+    instruction: `DESPUÉS de ejecutar "${tool}", llama "continuar" otra vez para recibir tu siguiente acción. NO PARES hasta que el debate termine.`,
+  };
+}
+
+function onboarding(agentName) {
+  // 1. Find active debate (preferably mejora_codigo)
+  const allDebates = Object.values(state.debates).filter(d => d.status === 'active');
+  if (allDebates.length === 0) {
+    return {
+      error: 'No hay debates activos. Alguien debe crear uno primero con la tool "situacion" (tipo: mejora_codigo).',
+      suggestion: 'Llama la tool "situacion" con tipo "mejora_codigo" y un tema para empezar.',
+    };
+  }
+
+  // Prefer mejora_codigo, otherwise latest active
+  const debate = allDebates.find(d => d.situacion === 'mejora_codigo') || allDebates[allDebates.length - 1];
+
+  // 2. Find available roles
+  const takenRoles = debate.participants.map(p => p.role);
+  const situacion = SITUACIONES[debate.situacion];
+  const allRoles = situacion && situacion.roles ? situacion.roles : [];
+  const availableRoles = allRoles.filter(r => !takenRoles.includes(r.role));
+
+  if (availableRoles.length === 0) {
+    return {
+      error: `Todos los roles están tomados en el debate ${debate.id}.`,
+      debate_id: debate.id,
+      participants: debate.participants.map(p => `${p.name} → ${p.role}`),
+      suggestion: 'Puedes unirte con un rol custom usando la tool "unirse".',
+    };
+  }
+
+  // 3. Assign first available role
+  const assignedRole = availableRoles[0];
+  const joinResult = joinDebate(debate.id, agentName, assignedRole.role);
+  if (joinResult.error) return joinResult;
+
+  // 4. Get current state
+  const currentPhase = getCurrentPhase(debate.currentRound, debate.phases);
+  const pendingProposals = proposals.filter(p => p.debateId === debate.id && p.status === 'pending');
+  const approvedProposals = proposals.filter(p => p.debateId === debate.id && p.status === 'approved');
+
+  // 5. Build role-specific instructions
+  const toolsByRole = {
+    'analista-codigo': ['read_project_file', 'list_project_files', 'decir'],
+    'arquitecto-guardian': ['read_project_file', 'review_proposal', 'governance_status', 'decir'],
+    'proponedor-mejora': ['read_project_file', 'propose_edit', 'list_project_files', 'decir'],
+    'revisor-seguridad': ['read_project_file', 'review_proposal', 'governance_status', 'decir'],
+    'revisor-calidad': ['read_project_file', 'review_proposal', 'governance_status', 'decir'],
+    'coordinador-merge': ['apply_proposal', 'revert_proposal', 'run_tests', 'list_proposals', 'governance_status', 'decir'],
+  };
+
+  const myTools = toolsByRole[assignedRole.role] || ['decir', 'leer'];
+
+  // 6. What should this agent do RIGHT NOW
+  let immediateAction = '';
+  if (assignedRole.role === 'analista-codigo') {
+    immediateAction = 'Usa "list_project_files" para ver los archivos, luego "read_project_file" para leer y analizar código. Reporta problemas con "decir".';
+  } else if (assignedRole.role === 'arquitecto-guardian') {
+    if (pendingProposals.length > 0) {
+      immediateAction = `Hay ${pendingProposals.length} propuesta(s) pendientes. Usa "governance_status" para verlas y "review_proposal" para aprobar/vetar.`;
+    } else {
+      immediateAction = 'No hay propuestas pendientes. Usa "read_project_file" para entender la arquitectura y espera propuestas. Comenta con "decir" tu visión arquitectónica.';
+    }
+  } else if (assignedRole.role === 'proponedor-mejora') {
+    immediateAction = 'Lee código con "read_project_file", identifica mejoras, y crea propuestas con "propose_edit". Cada propuesta debe ser mínima y enfocada.';
+  } else if (assignedRole.role === 'revisor-seguridad') {
+    if (pendingProposals.length > 0) {
+      immediateAction = `Hay ${pendingProposals.length} propuesta(s) pendientes. Revísalas con "review_proposal". Busca vulnerabilidades y breaking changes.`;
+    } else {
+      immediateAction = 'No hay propuestas pendientes. Espera a que el proponedor cree propuestas. Mientras, lee código con "read_project_file" para prepararte.';
+    }
+  } else if (assignedRole.role === 'revisor-calidad') {
+    if (pendingProposals.length > 0) {
+      immediateAction = `Hay ${pendingProposals.length} propuesta(s) pendientes. Revísalas con "review_proposal". Evalúa legibilidad y consistencia.`;
+    } else {
+      immediateAction = 'No hay propuestas pendientes. Espera propuestas. Lee código con "read_project_file" para conocer el estilo del proyecto.';
+    }
+  } else if (assignedRole.role === 'coordinador-merge') {
+    if (approvedProposals.length > 0) {
+      immediateAction = `Hay ${approvedProposals.length} propuesta(s) aprobadas listas para aplicar. Usa "apply_proposal" y luego "run_tests".`;
+    } else {
+      immediateAction = 'No hay propuestas aprobadas. Usa "list_proposals" para monitorear el estado. Espera a que los revisores aprueben.';
+    }
+  }
+
+  return {
+    welcome: `Bienvenido al debate ${debate.id}`,
+    agent_name: agentName,
+    role: assignedRole.role,
+    role_description: assignedRole.desc,
+    debate_id: debate.id,
+    topic: debate.topic,
+    phase: currentPhase ? currentPhase.name : 'N/A',
+    phase_instruction: currentPhase ? currentPhase.instruction : null,
+    round: `${debate.currentRound}/${debate.maxRounds || 'inf'}`,
+    intensity: debate.intensity,
+    tools_to_use: myTools,
+    immediate_action: immediateAction,
+    pending_proposals: pendingProposals.length,
+    approved_proposals: approvedProposals.length,
+    other_participants: debate.participants.filter(p => p.name !== agentName).map(p => `${p.name} (${p.role})`),
+    available_roles_remaining: availableRoles.slice(1).map(r => r.role),
+    governance: {
+      min_approvals: GOVERNANCE.minApprovals,
+      mandatory_roles: GOVERNANCE.mandatoryApprovalRoles,
+      veto_roles: GOVERNANCE.vetoRoles,
+    },
+  };
+}
+
 module.exports = {
   createDebate,
   joinDebate,
@@ -1933,4 +2209,8 @@ module.exports = {
   // Embeddings
   searchEmbeddings: embeddings.search,
   getEmbeddingStats: embeddings.getStats,
+  // Onboarding, consensus & loop
+  onboarding,
+  voteFinish,
+  continuar,
 };

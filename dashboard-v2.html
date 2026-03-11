@@ -1187,6 +1187,7 @@
 
   // ── UTILITIES ────────────────────────────────────────────────────────
   function getInitials(name) {
+    if (!name) return '??';
     return name.split('-').map(w => w[0]).join('').toUpperCase().slice(0, 2);
   }
 
@@ -1545,15 +1546,15 @@
         marker.textContent = `Round ${msg.round}`;
         container.appendChild(marker);
       }
-      const color = getColor(msg.name);
+      const color = getColor(msg.participantName||msg.name);
       const msgEl = document.createElement('div');
       msgEl.className = 'message-item';
       const wordCount = getWordCount(msg.text);
       msgEl.innerHTML = `
-        <div class="message-avatar-small" style="background:${color}">${getInitials(msg.name)}</div>
+        <div class="message-avatar-small" style="background:${color}">${getInitials(msg.participantName||msg.name)}</div>
         <div class="message-bubble">
           <div class="message-header-small">
-            <div class="message-name-small" style="color:${color}">${msg.name}</div>
+            <div class="message-name-small" style="color:${color}">${msg.participantName||msg.name}</div>
             <div class="message-time-small">${formatTime(msg.timestamp)}</div>
           </div>
           <div class="message-text-small">${escapeHtml(msg.text)}</div>
