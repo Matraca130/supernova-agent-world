@@ -641,7 +641,7 @@ function drawAgent(agent) {
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.fill();
 
-  const bodyBob = walking ? Math.sin(frame * Math.PI / 2) * 1.5 : breathe;
+  const bodyBob = walking ? Math.sin(frame * Math.PI / 2) * 0.4 : breathe;
   const legOffset = walking ? Math.sin(frame * Math.PI / 2) * 4 : 0;
 
   // Legs
