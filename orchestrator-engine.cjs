@@ -1,16 +1,23 @@
 /**
- * Orchestrator Engine — Server-side autonomous debate runner
+ * Orchestrator Engine — Server-side debate runner (coordinated mode)
  *
- * Runs multi-agent debates WITHOUT depending on external AI clients.
- * The server itself calls OpenAI's API to generate agent responses.
+ * Figma Make agents provide ALL debate content via decir(). The server:
+ * - Manages turns, rounds, timing
+ * - Uses OpenAI as LOOP COORDINATOR: sends constant request signals to keep agents talking
+ * - Uses OpenAI for SYNTHESIS at the end (summary of debate)
+ * - Uses OpenAI for RETROSPECTIVES at the end (agent reflections, mejora continua)
+ * - OpenAI NEVER speaks as an agent — only coordinates and summarizes
  *
  * Usage:
  *   const { runDebate } = require('./orchestrator-engine.cjs');
+ *
  *   const result = await runDebate({
  *     situacion: 'mejora_codigo',
  *     tema: 'Refactorizar el sistema de autenticacion',
  *     numAgents: 4,
  *     maxRounds: 10,
+ *     model: 'gpt-4o-mini',
+ *     turnTimeout: 120000,
  *     onMessage: (msg) => console.log(msg)
  *   });
  */
@@ -19,7 +26,7 @@ const fs = require('fs');
 const path = require('path');
 const dm = require('./debate-manager.cjs');
 
-// --- Load API key from .env (same pattern as embeddings.cjs) ---
+// --- Load API key from .env ---
 let OPENAI_API_KEY = '';
 try {
   const envPath = path.join(__dirname, '.env');
@@ -33,12 +40,18 @@ try {
 }
 
 // --- Constants ---
-const SAFETY_CAP_ROUNDS = 20;
-const DEBATE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const SAFETY_CAP_ROUNDS = 30;
+const DEBATE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const AGENT_DELAY_MS = 200;
-const MAX_RETRY_ATTEMPTS = 2;
+const LOOP_COORDINATOR_INTERVAL = 2; // Run loop coordinator every N rounds
 
-// --- OpenAI API call via native fetch ---
+// --- Utility: sleep ---
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// --- OpenAI API call (for coordination, synthesis, retrospectives ONLY — never agent responses) ---
 
 async function callLLM(prompt, model = 'gpt-4o-mini') {
   if (!OPENAI_API_KEY) {
@@ -55,7 +68,7 @@ async function callLLM(prompt, model = 'gpt-4o-mini') {
       model,
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 1000,
-      temperature: 0.9
+      temperature: 0.7
     })
   });
 
@@ -71,54 +84,52 @@ async function callLLM(prompt, model = 'gpt-4o-mini') {
   return data.choices[0].message.content;
 }
 
-// --- Prompt builder ---
+// --- Loop Coordinator: keeps Figma Make agents talking ---
 
-function buildAgentPrompt(agent, debate, recentMessages, phase) {
-  const phaseName = phase ? phase.name : 'DEBATE ABIERTO';
-  const phaseInstruction = phase ? phase.instruction : 'Participa activamente en el debate. Defiende tu posicion con argumentos solidos.';
+function buildLoopCoordinatorPrompt(debate, recentMessages, agents, round, maxRounds) {
+  const agentList = agents.map(a => `${a.name} (${a.role})`).join(', ');
+  const msgBlock = recentMessages.length > 0
+    ? recentMessages.map(m => `[${m.participantName} (${m.participantRole})]: ${(m.text || '').slice(0, 200)}`).join('\n')
+    : '(No messages yet)';
 
-  return `You are ${agent.name}, role: ${agent.role}.
+  return `You are a LOOP COORDINATOR for a multi-agent debate with Claude Opus 4.6 agents. Your job is to generate a STRUCTURED coordination signal with 3 components. You do NOT participate in the debate.
 
-YOUR ROLE DESCRIPTION: ${agent.desc || agent.role}
-
-DEBATE TOPIC: ${debate.topic}
-CURRENT PHASE: ${phaseName}
-PHASE INSTRUCTION: ${phaseInstruction}
-ROUND: ${debate.currentRound}
-
-RULES:
-- You MUST argue from your role's perspective
-- You MUST object to at least one other participant by NAME
-- You MUST provide concrete evidence and reasoning
-- Your response MUST be at least 150 words — be detailed and thorough
-- NEVER agree easily — push back, question, challenge
-- Use specific examples, data points, or scenarios to support your arguments
-- Address at least one point made by another participant directly
-- Propose at least one concrete action or recommendation
+TOPIC: ${debate.topic}
+ROUND: ${round}/${maxRounds}
+AGENTS: ${agentList}
 
 RECENT MESSAGES:
-${recentMessages.length > 0 ? recentMessages.map(m => `[${m.from} (${m.role})]: ${m.text}`).join('\n\n') : '(No messages yet — you are opening the debate. State your position clearly and strongly.)'}
+${msgBlock}
 
-NOW RESPOND AS ${agent.name} (${agent.role}). Be specific, detailed, and confrontational. Remember: minimum 150 words, argue from YOUR unique perspective.`;
+Generate a coordination signal (max 150 words) with EXACTLY these 3 sections:
+
+DIRECTIVA: [Who should speak next and what specific action they must take. Name the agent and reference a concrete point from recent messages.]
+
+TENSIONES: [List 1-2 unresolved disagreements or open questions from recent messages that need direct confrontation. Quote the conflicting positions.]
+
+OPORTUNIDADES: [Identify 1 connection between messages that no one has made yet. Suggest a synthesis or unexpected angle.]
+
+Examples:
+DIRECTIVA: Arquitecto, respond directly to Frontend Dev's concern about coupling in message #5. Propose a concrete alternative with file paths.
+TENSIONES: QA says auth flow is insecure (msg #3) but Arquitecto says it's sufficient (msg #4). This needs resolution.
+OPORTUNIDADES: Frontend Dev's caching idea (msg #2) could solve QA's performance concern (msg #6) if combined.
+
+YOUR SIGNAL:`;
 }
 
-function buildRetryPrompt(agent, debate, recentMessages, phase, previousResponse, rejectReason) {
-  const basePrompt = buildAgentPrompt(agent, debate, recentMessages, phase);
-  return `${basePrompt}
+// --- Synthesis prompt (end of debate) ---
 
-IMPORTANT: Your previous response was REJECTED for the following reason:
-"${rejectReason}"
-
-Your previous response was:
-"${previousResponse.slice(0, 300)}..."
-
-You MUST write a LONGER and MORE DETAILED response this time. Expand your arguments, add more examples, reference other participants by name, and provide concrete evidence. AIM FOR AT LEAST 200 WORDS.`;
-}
-
-function buildSynthesisPrompt(debate) {
+function buildSynthesisPrompt(debate, pastRetrospectives) {
   const allMessages = debate.messages.map(m =>
     `[Round ${m.round}] ${m.participantName} (${m.participantRole}): ${m.text}`
   ).join('\n\n');
+
+  let retroBlock = '';
+  if (pastRetrospectives && pastRetrospectives.length > 0) {
+    retroBlock = '\n\nINSIGHTS FROM PREVIOUS DEBATES:\n' +
+      pastRetrospectives.map(r => `- ${r.agent}: "${r.retro}"`).join('\n') +
+      '\nConsider these insights when synthesizing.\n';
+  }
 
   return `You are a neutral debate moderator. Summarize the following debate comprehensively.
 
@@ -128,7 +139,7 @@ PARTICIPANTS: ${debate.participants.map(p => `${p.name} (${p.role})`).join(', ')
 
 ALL MESSAGES:
 ${allMessages}
-
+${retroBlock}
 Provide a structured synthesis with:
 1. KEY AGREEMENTS — Points where participants found common ground
 2. KEY DISAGREEMENTS — Unresolved conflicts and opposing views
@@ -139,10 +150,48 @@ Provide a structured synthesis with:
 Be concise but thorough. Write in the same language as the debate messages.`;
 }
 
-// --- Utility: sleep ---
+// --- Wait for external agent (coordinated mode) ---
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+async function waitForExternalAgent(debateId, agentName, log, timeoutMs = 120000) {
+  const startWait = Date.now();
+  const initialMsgCount = (dm.read(debateId, 0, 0).messages || []).length;
+
+  log('turn_request', {
+    debateId,
+    agent: agentName,
+    message: `Waiting for ${agentName} to respond via decir()`,
+    timeout_seconds: Math.round(timeoutMs / 1000),
+  });
+
+  const agentNameLower = agentName.toLowerCase();
+
+  while (Date.now() - startWait < timeoutMs) {
+    const current = dm.read(debateId, 0, 0);
+
+    // Check if debate was finalized externally
+    if (current.debate && (current.debate.status === 'finished' || current.debate.status === 'cancelled')) {
+      log('system', { message: `Debate ${debateId} was finalized during wait for ${agentName}` });
+      return null;
+    }
+
+    const messages = current.messages || [];
+
+    if (messages.length > initialMsgCount) {
+      const newMsgs = messages.slice(initialMsgCount);
+      // Case-insensitive name matching to handle naming variations
+      const agentMsg = newMsgs.find(m =>
+        m.participantName === agentName ||
+        (m.participantName && m.participantName.toLowerCase() === agentNameLower)
+      );
+      if (agentMsg) {
+        return agentMsg;
+      }
+    }
+
+    await sleep(2000); // Poll every 2s
+  }
+
+  return null; // Timeout — agent didn't respond
 }
 
 // --- Repetition detection ---
@@ -176,6 +225,42 @@ function computeJaccardSimilarity(a, b) {
   return union.size === 0 ? 0 : intersection.size / union.size;
 }
 
+// --- Build a structural summary (no AI, just facts) ---
+
+function buildStructuralSummary(debateData) {
+  if (!debateData || debateData.messages.length === 0) {
+    return 'No messages were generated during this debate.';
+  }
+
+  const { topic, messages, currentRound, participants } = debateData;
+
+  const participantLines = participants.map(p => `  - ${p.name} (${p.role})`).join('\n');
+
+  // Count messages per participant
+  const msgCounts = {};
+  for (const msg of messages) {
+    const name = msg.participantName || 'unknown';
+    msgCounts[name] = (msgCounts[name] || 0) + 1;
+  }
+  const contributionLines = Object.entries(msgCounts)
+    .map(([name, count]) => `  - ${name}: ${count} message${count !== 1 ? 's' : ''}`)
+    .join('\n');
+
+  return [
+    `DEBATE SUMMARY`,
+    `==============`,
+    `Topic: ${topic}`,
+    `Rounds completed: ${currentRound}`,
+    `Total messages: ${messages.length}`,
+    ``,
+    `Participants:`,
+    participantLines,
+    ``,
+    `Contributions:`,
+    contributionLines,
+  ].join('\n');
+}
+
 // --- Main debate runner ---
 
 async function runDebate(config) {
@@ -186,6 +271,7 @@ async function runDebate(config) {
     maxRounds = 10,
     model = 'gpt-4o-mini',
     onMessage = null,
+    turnTimeout = 120000,
   } = config;
 
   if (!tema) {
@@ -203,7 +289,7 @@ async function runDebate(config) {
     }
   };
 
-  log('system', { message: `Starting debate: "${tema}" with ${numAgents} agents, situacion: ${situacion}` });
+  log('system', { message: `Starting debate: "${tema}" with ${numAgents} agents, situacion: ${situacion}, mode: coordinated` });
 
   // 1. Create debate via crearSituacion
   const creation = dm.crearSituacion(situacion, tema, numAgents);
@@ -226,6 +312,19 @@ async function runDebate(config) {
     maxRounds: debate.maxRounds,
   });
 
+  // 1.5 Load active principles from previous debates
+  let activePrinciples = [];
+  try {
+    const principles = require('./principles.cjs');
+    activePrinciples = principles.getActivePrinciples(10);
+    if (activePrinciples.length > 0) {
+      principles.markPrinciplesUsed(activePrinciples.map(p => p.id), debateId);
+      log('system', { message: `[principles] Loaded ${activePrinciples.length} active principles` });
+    }
+  } catch (err) {
+    log('error', { message: `[principles] Failed to load: ${err.message}` });
+  }
+
   // 2. Run rounds
   const effectiveMaxRounds = maxRounds > 0 ? Math.min(maxRounds, SAFETY_CAP_ROUNDS) : SAFETY_CAP_ROUNDS;
   let roundCount = 0;
@@ -240,6 +339,21 @@ async function runDebate(config) {
 
       roundCount++;
       log('round_start', { round: roundCount, debateId });
+
+      // Loop Coordinator: send constant signals to keep agents going
+      let loopInstruction = null;
+      if (roundCount >= 2 && roundCount % LOOP_COORDINATOR_INTERVAL === 0 && debate.messages.length > 0) {
+        try {
+          const recentMsgs = debate.messages.slice(-6);
+          const coordPrompt = buildLoopCoordinatorPrompt(debate, recentMsgs, agents, roundCount, effectiveMaxRounds);
+          loopInstruction = await callLLM(coordPrompt, model);
+          if (loopInstruction) {
+            log('loop_coordinator', { round: roundCount, instruction: loopInstruction.trim() });
+          }
+        } catch (err) {
+          log('error', { message: `[loop-coordinator] failed: ${err.message}` });
+        }
+      }
 
       // Get pending turns
       const pending = dm.getAllPendingTurns(debateId);
@@ -273,10 +387,10 @@ async function runDebate(config) {
         }
 
         // Process this new round's turns
-        await processRoundTurns(newPending, debate, debateId, agents, model, log, startTime);
+        await processRoundTurns(newPending, debate, debateId, agents, log, startTime, turnTimeout);
       } else {
         // Process pending turns
-        await processRoundTurns(pending, debate, debateId, agents, model, log, startTime);
+        await processRoundTurns(pending, debate, debateId, agents, log, startTime, turnTimeout);
       }
 
       // Check repetitiveness in infinite mode
@@ -303,21 +417,115 @@ async function runDebate(config) {
     log('error', { message: `Debate loop error: ${err.message}` });
   }
 
-  // 3. Generate synthesis
+  // 2.5 Warn if coordinated mode produced no messages (no agents connected?)
+  if (!debate.messages || debate.messages.length === 0) {
+    log('warning', {
+      message: 'Coordinated debate finished with 0 messages. No Figma Make agents responded. Ensure agents are connected and calling onboarding() + decir().',
+    });
+  }
+
+  // 3. Generate synthesis via OpenAI (end of debate only)
   log('system', { message: 'Generating synthesis...' });
+  const synthesisData = getDebateData(debateId);
   let synthesis = '';
   try {
-    const synthesisData = getDebateData(debateId);
+    let pastRetros = [];
+    try {
+      const outcomesModule = require('./debate-outcomes.cjs');
+      pastRetros = outcomesModule.getRecentRetrospectives(3);
+    } catch {}
 
     if (synthesisData && synthesisData.messages.length > 0) {
-      synthesis = await callLLM(buildSynthesisPrompt(synthesisData), model);
+      synthesis = await callLLM(buildSynthesisPrompt(synthesisData, pastRetros), model);
       log('synthesis', { synthesis });
     } else {
       synthesis = 'No messages were generated during this debate.';
     }
   } catch (err) {
     log('error', { message: `Synthesis generation failed: ${err.message}` });
-    synthesis = 'Synthesis generation failed due to an API error.';
+    synthesis = buildStructuralSummary(synthesisData); // fallback to structural
+  }
+
+  // 3.5 Extract principles from messages (best-effort without synthesis)
+  let extractedPrinciples = [];
+  try {
+    const principles = require('./principles.cjs');
+    const allText = (synthesisData ? synthesisData.messages : [])
+      .map(m => m.text || '')
+      .join('\n');
+    const actionItemLines = allText.split('\n')
+      .map(l => l.trim())
+      .filter(l => /^(\d+[\.\)]\s|[-*]\s)/.test(l))
+      .map(l => l.replace(/^(\d+[\.\)]\s|[-*]\s)/, '').trim())
+      .filter(l => l.length > 10);
+    extractedPrinciples = principles.extractPrinciples(allText, debateId, actionItemLines) || [];
+  } catch (err) {
+    log('error', { message: `[principles] extraction failed: ${err.message}` });
+  }
+
+  // 3.6 Run principles maintenance (correlate + retire bad)
+  try {
+    const principlesModule = require('./principles.cjs');
+    const outcomesModule = require('./debate-outcomes.cjs');
+    const correlationData = outcomesModule.getCorrelationData();
+    if (correlationData.length >= 2) {
+      const maintenance = principlesModule.runMaintenance(correlationData);
+      if (maintenance.retired.length > 0) {
+        log('system', { message: `[principles] Retired ${maintenance.retired.length} bad principles: ${maintenance.retired.join(', ')}` });
+      }
+      log('system', { message: `[principles] Maintenance: ${maintenance.correlated} correlated, ${maintenance.total} total` });
+    }
+  } catch (err) {
+    log('error', { message: `[principles] maintenance failed: ${err.message}` });
+  }
+
+  // 3.65 Record outcome for self-improvement
+  const allPrinciplesUsed = [...(activePrinciples ? activePrinciples.map(p => p.id) : []), ...(extractedPrinciples || []).map(p => p.id)];
+  try {
+    const outcomes = require('./debate-outcomes.cjs');
+    outcomes.recordOutcome({
+      debateId,
+      topic: tema,
+      messages: debate.messages || [],
+      rounds: debate.currentRound || roundCount,
+      maxRounds: effectiveMaxRounds,
+      duration: Date.now() - startTime,
+      agents,
+      synthesis,
+      principlesUsed: allPrinciplesUsed,
+      qualityScores: [],
+      repetitionDetected: maxRounds === 0 && debate.messages.length > 16 && areResponsesRepetitive(debate.messages),
+    });
+  } catch (err) {
+    log('error', { message: `[outcomes] Failed to record: ${err.message}` });
+  }
+
+  // 3.7 Agent retrospectives via OpenAI (end of debate — mejora continua)
+  const retrospectives = [];
+  try {
+    const retroPromptBase = (agentName, agentRole, topic, synthesisText) =>
+      `You are ${agentName} (${agentRole}). A debate just finished on: "${topic}".
+
+Here is the synthesis:
+${synthesisText.slice(0, 1500)}
+
+In EXACTLY ONE SENTENCE (max 30 words), describe what you learned or what you would do differently next time. Be specific and self-critical. Start with "I learned..." or "Next time I would..."`;
+
+    const retroPromises = agents.map(agent =>
+      callLLM(retroPromptBase(agent.name, agent.role, tema, synthesis), model)
+        .then(text => ({ agent: agent.name, role: agent.role, retro: text.trim().split('\n')[0].slice(0, 150) }))
+        .catch(() => ({ agent: agent.name, role: agent.role, retro: null }))
+    );
+    const retroResults = await Promise.all(retroPromises);
+
+    for (const r of retroResults) {
+      if (r.retro) {
+        retrospectives.push(r);
+        log('retrospective', { agent: r.agent, retro: r.retro });
+      }
+    }
+  } catch (err) {
+    log('error', { message: `[retrospectives] failed: ${err.message}` });
   }
 
   // 4. Finish debate
@@ -335,6 +543,7 @@ async function runDebate(config) {
     messages: finalData ? finalData.messages : [],
     rounds: finalData ? finalData.currentRound : roundCount,
     synthesis,
+    retrospectives,
     duration,
   };
 
@@ -350,19 +559,31 @@ async function runDebate(config) {
 
 // --- Process all pending turns for a round ---
 
-async function processRoundTurns(pending, debate, debateId, agents, model, log, startTime) {
+async function processRoundTurns(pending, debate, debateId, agents, log, startTime, turnTimeout = 120000) {
   if (!pending.turns || pending.turns.length === 0) return;
 
-  // Phase info is at the top level of the pending response
-  const phase = pending.phase ? {
-    name: pending.phase,
-    instruction: pending.phaseInstruction || '',
-  } : null;
+  // Reorder turns by agent competence (most competent first)
+  let orderedTurns = pending.turns;
+  try {
+    const sm2 = require('./sm2-lite.cjs');
+    const competences = sm2.loadCompetences();
+    orderedTurns = [...pending.turns].sort((a, b) => {
+      const nameA = (a.agent && a.agent.name) || '';
+      const nameB = (b.agent && b.agent.name) || '';
+      const compA = sm2.getCompetenceForAgent(competences, nameA);
+      const compB = sm2.getCompetenceForAgent(competences, nameB);
+      if (!compA && !compB) return 0;
+      if (!compA) return 1;
+      if (!compB) return -1;
+      const weightA = sm2.getAgentWeight(compA, debate.topic || '');
+      const weightB = sm2.getAgentWeight(compB, debate.topic || '');
+      return weightB - weightA; // Higher weight first
+    });
+  } catch (err) {
+    // Fall back to default order if sm2-lite fails
+  }
 
-  // Recent messages are shared at the top level
-  const recentMessages = pending.recentMessages || [];
-
-  for (const turn of pending.turns) {
+  for (const turn of orderedTurns) {
     // Timeout check
     if (Date.now() - startTime > DEBATE_TIMEOUT_MS) {
       break;
@@ -376,56 +597,26 @@ async function processRoundTurns(pending, debate, debateId, agents, model, log, 
       desc: turnAgent.roleDesc || turnAgent.role || 'participant',
     };
 
-    // Generate response via LLM
-    let response = null;
-    try {
-      const prompt = buildAgentPrompt(agent, debate, recentMessages, phase);
-      response = await callLLM(prompt, model);
-    } catch (err) {
-      log('error', { message: `LLM call failed for ${agent.name}: ${err.message}` });
-      continue; // Skip this agent's turn
-    }
+    // Wait for external agent to call decir()
+    const agentMsg = await waitForExternalAgent(debateId, agent.name, log, turnTimeout);
 
-    if (!response) continue;
-
-    // Try to submit the response
-    let sayResult = dm.say(debateId, agent.name, response);
-
-    // Retry if rejected (word count too low)
-    if (sayResult.rejected) {
-      log('retry', { agent: agent.name, reason: sayResult.error });
-
-      for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
-        try {
-          const retryPrompt = buildRetryPrompt(
-            agent, debate, recentMessages, phase,
-            response, sayResult.error
-          );
-          response = await callLLM(retryPrompt, model);
-          sayResult = dm.say(debateId, agent.name, response);
-
-          if (!sayResult.rejected) break;
-          log('retry', { agent: agent.name, attempt: attempt + 1, reason: sayResult.error });
-        } catch (err) {
-          log('error', { message: `Retry LLM call failed for ${agent.name}: ${err.message}` });
-          break;
-        }
-      }
-    }
-
-    if (sayResult.error && !sayResult.rejected) {
-      log('error', { message: `say() failed for ${agent.name}: ${sayResult.error}` });
-    } else if (!sayResult.error) {
+    if (agentMsg) {
       log('agent_message', {
         agent: agent.name,
         role: agent.role,
         round: debate.currentRound,
-        wordCount: response.trim().split(/\s+/).length,
-        preview: response.slice(0, 200),
+        wordCount: (agentMsg.text || '').trim().split(/\s+/).length,
+        preview: (agentMsg.text || '').slice(0, 200),
+      });
+    } else {
+      log('turn_timeout', {
+        debateId,
+        agent: agent.name,
+        message: `${agent.name} did not respond within ${Math.round(turnTimeout / 1000)}s — skipping turn`,
       });
     }
 
-    // Small delay between agents to avoid rate limits
+    // Small delay between agents
     await sleep(AGENT_DELAY_MS);
   }
 }
