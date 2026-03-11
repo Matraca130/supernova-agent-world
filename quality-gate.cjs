@@ -286,6 +286,29 @@ function getRejectReason(score, threshold = 0.35) {
 }
 
 /**
+ * Detecta anomalías en mensajes: baja relevancia + alta confianza = sospechoso.
+ * Diseñado para proteger el context window expandido de envenenamiento.
+ * @param {string} message — texto del mensaje
+ * @param {string} topic — tema del debate
+ * @param {number} [confidence=0.5] — confianza declarada por el agente (0-1)
+ * @param {number} [relevanceThreshold=0.3] — umbral de relevancia
+ * @param {number} [confidenceThreshold=0.9] — umbral de confianza sospechosa
+ * @returns {Promise<{ suspicious: boolean, relevance: number, confidence: number, reason: string|null }>}
+ */
+async function detectAnomaly(message, topic, confidence = 0.5, relevanceThreshold = 0.3, confidenceThreshold = 0.9) {
+  const relevance = await measureRelevance(message, topic);
+  const suspicious = relevance < relevanceThreshold && confidence > confidenceThreshold;
+  return {
+    suspicious,
+    relevance: parseFloat(relevance.toFixed(3)),
+    confidence,
+    reason: suspicious
+      ? `Anomaly: baja relevancia (${relevance.toFixed(3)}) con alta confianza (${confidence}) — posible context poisoning`
+      : null,
+  };
+}
+
+/**
  * Sanitiza output de agentes para prevenir prompt injection entre agentes.
  * NO borra contenido sospechoso — lo envuelve en markers visibles pero no ejecutables.
  * @param {string} text — texto del agente a sanitizar
