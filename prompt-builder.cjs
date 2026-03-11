@@ -5,6 +5,12 @@
  * extracción de datos estructurados de las respuestas.
  */
 
+// NOTE: This module is used by the Figma Make MCP flow (via external AI clients).
+// orchestrator-engine.cjs has its own buildAgentPrompt for the autonomous flow (run_debate).
+// Both flows should maintain feature parity where practical.
+// Shared features: principles injection, checkpoint extraction
+// Orchestrator-only: moderator instructions, quality gate retry, competence ordering
+
 const { emptyCheckpoint } = require('./SessionTypes.cjs');
 
 // ── Checkpoint instructions (se agrega al final de cada prompt) ─────────
@@ -12,13 +18,18 @@ const CHECKPOINT_INSTRUCTIONS = `
 
 IMPORTANTE: Tu respuesta DEBE terminar con un bloque estructurado:
 ---CHECKPOINT---
-{"consenso":["punto 1","punto 2"],"divergencias":["punto 1"],"preguntas":["pregunta 1"],"accionable":["accion 1","accion 2"]}
+{"consenso":["punto 1","punto 2"],"divergencias":["punto 1"],"preguntas":["pregunta 1"],"accionable":["accion 1","accion 2"],"reasoning_chain":["paso 1","paso 2","conclusion"],"builds_on":["nombre_agente: idea que extiende"],"confidence":0.85,"uncertainty_areas":["area donde no tengo certeza"],"meta_observation":"nota sobre la calidad del debate"}
 ---END---
 
 - consenso: ideas con las que estas de acuerdo o que refuerzas
 - divergencias: ideas con las que NO estas de acuerdo
 - preguntas: dudas que quedan abiertas
-- accionable: cosas concretas que se deben implementar`;
+- accionable: cosas concretas que se deben implementar
+- reasoning_chain: tu cadena de razonamiento paso a paso (permite que otros objeten pasos individuales)
+- builds_on: lista de ideas de OTROS agentes que estas extendiendo (formato "nombre: idea")
+- confidence: 0.0-1.0 que tan seguro estas de tu posicion
+- uncertainty_areas: areas especificas donde NO tienes certeza y necesitas input
+- meta_observation: observacion sobre el PROCESO del debate (bias, perspectivas faltantes, calidad del dialogo)`;
 
 // ── Parse checkpoint from response ──────────────────────────────────────
 
@@ -102,7 +113,7 @@ function extractSection(text, header) {
 /**
  * Construye el prompt para el primer mensaje de la sesión
  */
-function buildFirstPrompt({ agent, agents, topic, salaName, otherSalaName, maxWords, contextContent, memory }) {
+function buildFirstPrompt({ agent, agents, topic, salaName, otherSalaName, maxWords, contextContent, memory, principles }) {
   const others = agents.filter(a => a !== agent).join(', ');
 
   let prompt = `Eres ${agent} en la "${salaName}" del proyecto Axon (plataforma educativa medica, React+TypeScript+Vite+Supabase).
@@ -121,6 +132,14 @@ CONTEXTO:
     prompt += `\nMEMORIA DE SESIONES ANTERIORES:\n${memory}\nIMPORTANTE: NO repitas ideas anteriores. Construye SOBRE ellas.\n`;
   }
 
+  if (principles && principles.length > 0) {
+    prompt += `\nPRINCIPIOS APRENDIDOS DE DEBATES ANTERIORES:\n`;
+    for (const p of principles) {
+      prompt += `- ${p.text}\n`;
+    }
+    prompt += `Tené en cuenta estos principios al formular tu respuesta.\n`;
+  }
+
   prompt += `
 TU TAREA:
 Da tu perspectiva CREATIVA e INNOVADORA. Se especifico para Axon:
@@ -137,7 +156,7 @@ Maximo ${maxWords} palabras. Responde con texto.${CHECKPOINT_INSTRUCTIONS}`;
 /**
  * Construye el prompt para rondas de debate (2+)
  */
-function buildDebatePrompt({ agent, agents, topic, salaName, ownHistory, otherHistory, otherSalaName, round, totalRounds, maxWords, contextContent, memory }) {
+function buildDebatePrompt({ agent, agents, topic, salaName, ownHistory, otherHistory, otherSalaName, round, totalRounds, maxWords, contextContent, memory, principles, retrospectives }) {
   const others = agents.filter(a => a !== agent).join(', ');
 
   let prompt = `Eres ${agent} en la "${salaName}" del proyecto Axon.\n`;
@@ -148,6 +167,22 @@ function buildDebatePrompt({ agent, agents, topic, salaName, ownHistory, otherHi
 
   if (memory) {
     prompt += `\n${memory}\nIMPORTANTE: NO repitas ideas de sesiones anteriores. Construye SOBRE ellas.\n`;
+  }
+
+  if (principles && principles.length > 0) {
+    prompt += `\nPRINCIPIOS APRENDIDOS DE DEBATES ANTERIORES:\n`;
+    for (const p of principles) {
+      prompt += `- ${p.text}\n`;
+    }
+    prompt += `Tené en cuenta estos principios al formular tu respuesta.\n`;
+  }
+
+  if (retrospectives && retrospectives.length > 0) {
+    prompt += `\nINSIGHTS DE DEBATES ANTERIORES:\n`;
+    for (const r of retrospectives) {
+      prompt += `- ${r.agent}: "${r.retro}"\n`;
+    }
+    prompt += `Tené en cuenta estas lecciones.\n`;
   }
 
   prompt += `\nHISTORIAL DE TU SALA:\n${ownHistory}\n`;
