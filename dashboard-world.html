@@ -525,33 +525,79 @@ function drawRoom(room) {
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // Walls (isometric depth — back two walls)
-  const wallH = 12;
-  // Left wall
+  // Walls with texture + baseboard
+  const wallH = 16;
+
+  // Left wall fill
   ctx.beginPath();
   ctx.moveTo(corners[0].x, corners[0].y);
   ctx.lineTo(corners[0].x, corners[0].y - wallH);
   ctx.lineTo(corners[3].x, corners[3].y - wallH);
   ctx.lineTo(corners[3].x, corners[3].y);
   ctx.closePath();
-  ctx.fillStyle = room.color + '0c';
+  ctx.fillStyle = room.color + '15';
   ctx.fill();
-  ctx.strokeStyle = room.color + '30';
-  ctx.lineWidth = 0.5;
+  ctx.strokeStyle = room.color + '40';
+  ctx.lineWidth = 1;
   ctx.stroke();
+  // Left wall diagonal texture
+  ctx.save(); ctx.clip();
+  ctx.strokeStyle = room.color + '12'; ctx.lineWidth = 0.5;
+  for (let i = -wallH; i < 200; i += 8) {
+    ctx.beginPath();
+    ctx.moveTo(corners[0].x + i, corners[0].y - wallH);
+    ctx.lineTo(corners[0].x + i + wallH, corners[0].y);
+    ctx.stroke();
+  }
+  ctx.restore();
+  // Left wall baseboard (zocalo)
+  ctx.beginPath();
+  ctx.moveTo(corners[0].x, corners[0].y - 3);
+  ctx.lineTo(corners[3].x, corners[3].y - 3);
+  ctx.lineTo(corners[3].x, corners[3].y);
+  ctx.lineTo(corners[0].x, corners[0].y);
+  ctx.closePath();
+  ctx.fillStyle = room.color + '30';
+  ctx.fill();
 
-  // Back wall
+  // Back wall fill
   ctx.beginPath();
   ctx.moveTo(corners[0].x, corners[0].y);
   ctx.lineTo(corners[0].x, corners[0].y - wallH);
   ctx.lineTo(corners[1].x, corners[1].y - wallH);
   ctx.lineTo(corners[1].x, corners[1].y);
   ctx.closePath();
-  ctx.fillStyle = room.color + '0a';
+  ctx.fillStyle = room.color + '10';
   ctx.fill();
-  ctx.strokeStyle = room.color + '30';
-  ctx.lineWidth = 0.5;
+  ctx.strokeStyle = room.color + '40';
+  ctx.lineWidth = 1;
   ctx.stroke();
+  // Back wall diagonal texture
+  ctx.save();
+  var bwp = new Path2D();
+  bwp.moveTo(corners[0].x, corners[0].y);
+  bwp.lineTo(corners[0].x, corners[0].y - wallH);
+  bwp.lineTo(corners[1].x, corners[1].y - wallH);
+  bwp.lineTo(corners[1].x, corners[1].y);
+  bwp.closePath();
+  ctx.clip(bwp);
+  ctx.strokeStyle = room.color + '10'; ctx.lineWidth = 0.5;
+  for (let i = -200; i < 200; i += 8) {
+    ctx.beginPath();
+    ctx.moveTo(corners[0].x + i, corners[0].y - wallH);
+    ctx.lineTo(corners[0].x + i + wallH, corners[0].y);
+    ctx.stroke();
+  }
+  ctx.restore();
+  // Back wall baseboard
+  ctx.beginPath();
+  ctx.moveTo(corners[0].x, corners[0].y - 3);
+  ctx.lineTo(corners[1].x, corners[1].y - 3);
+  ctx.lineTo(corners[1].x, corners[1].y);
+  ctx.lineTo(corners[0].x, corners[0].y);
+  ctx.closePath();
+  ctx.fillStyle = room.color + '25';
+  ctx.fill();
 
   // Label
   const center = toScreen(room.x + room.w / 2, room.y + room.h / 2);
