@@ -13,6 +13,26 @@
 
 const { emptyCheckpoint } = require('./SessionTypes.cjs');
 
+// ── Dialogue Frame definitions by role (Claude Opus 4.6 optimization) ────
+const DIALOGUE_FRAMES = {
+  'analista-codigo': '[HALLAZGO] -> [EVIDENCIA-CODIGO] -> [IMPACTO] -> [RECOMENDACION]',
+  'arquitecto-guardian': '[EVALUACION] -> [RIESGO-BENEFICIO] -> [PATRON-PROPUESTO] -> [VALIDACION]',
+  'proponedor-mejora': '[ANALISIS] -> [EVIDENCIA] -> [PROPUESTA] -> [TRADE-OFFS] -> [PREGUNTA-DESAFIO]',
+  'revisor-seguridad': '[VULNERABILIDAD] -> [VECTOR-ATAQUE] -> [MITIGACION] -> [VERIFICACION]',
+  'revisor-calidad': '[METRICA] -> [COMPARACION] -> [SUGERENCIA] -> [CRITERIO-ACEPTACION]',
+  'coordinador-merge': '[ESTADO] -> [PRIORIDADES] -> [DECISION] -> [ASIGNACION]',
+  'default': '[POSICION] -> [ARGUMENTO] -> [EVIDENCIA] -> [PROPUESTA] -> [PREGUNTA]',
+};
+
+/**
+ * Obtiene el dialogue frame para un rol especifico.
+ * @param {string} role
+ * @returns {string}
+ */
+function getDialogueFrame(role) {
+  return DIALOGUE_FRAMES[role] || DIALOGUE_FRAMES['default'];
+}
+
 // ── Checkpoint instructions (se agrega al final de cada prompt) ─────────
 const CHECKPOINT_INSTRUCTIONS = `
 
@@ -61,6 +81,12 @@ function parseCheckpoint(raw, agentName, round) {
         divergencias: Array.isArray(parsed.divergencias) ? parsed.divergencias : [],
         preguntas: Array.isArray(parsed.preguntas) ? parsed.preguntas : [],
         accionable: Array.isArray(parsed.accionable) ? parsed.accionable : [],
+        // ── Structured Thought fields (Claude Opus 4.6 optimization) ──
+        reasoning_chain: Array.isArray(parsed.reasoning_chain) ? parsed.reasoning_chain : [],
+        builds_on: Array.isArray(parsed.builds_on) ? parsed.builds_on : [],
+        confidence: typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : null,
+        uncertainty_areas: Array.isArray(parsed.uncertainty_areas) ? parsed.uncertainty_areas : [],
+        meta_observation: typeof parsed.meta_observation === 'string' ? parsed.meta_observation.slice(0, 500) : null,
         structured: true,
         raw,
       };
