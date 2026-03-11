@@ -782,13 +782,26 @@ function drawAgentHabbo(agent) {
   const walking = agent.path.length > 0;
   const frame = agent.walkFrame;
   const breathe = agent.idle ? Math.sin(agent.idleTimer * 1.5) * 0.3 : 0;
-  const bodyBob = breathe; // NO bouncing while walking — adult composure
+  const bodyBob = breathe;
   const legOffset = walking ? Math.sin(frame * Math.PI / 2) * 3 : 0;
   const armSwing = walking ? Math.sin(frame * Math.PI / 2) * 2 : Math.sin(agent.idleTimer * 0.8) * 0.5;
 
-  // Assign hair if not set
-  if (!agent.hairColor) { agent.hairColor = HAIR_COLORS[hairColorIdx++ % HAIR_COLORS.length]; }
-  if (!agent.hairStyle) { agent.hairStyle = HAIR_STYLES[hairStyleIdx++ % HAIR_STYLES.length]; }
+  // Deterministic randomization from name
+  if (!agent._hashInit) {
+    var h = nameHash(agent.name);
+    agent.hairColor = HAIR_COLORS[h % HAIR_COLORS.length];
+    agent.hairStyle = HAIR_STYLES[(h >> 4) % HAIR_STYLES.length];
+    agent._shoeColor = SHOE_COLORS[(h >> 8) % SHOE_COLORS.length];
+    agent._accessory = ACCESSORIES[(h >> 12) % ACCESSORIES.length];
+    agent._shoulderW = 14 + (h % 5);
+    agent._legH = 9 + (h >> 3) % 4;
+    agent._torsoH = 13 + (h >> 6) % 3;
+    agent._hasDragon = (h % 7 === 0);
+    agent._hashInit = true;
+  }
+  var sw = agent._shoulderW;
+  var lh = agent._legH;
+  var th = agent._torsoH;
 
   ctx.save();
   ctx.translate(sx, sy);
