@@ -1,0 +1,52 @@
+{
+  "stable": {
+    "description": "Configuración conservadora — menos tokens, respuestas más cortas",
+    "model": "sonnet",
+    "effort": "high",
+    "rounds": 2,
+    "timeout": 120000,
+    "maxTokensPerAgent": 2000,
+    "crossPollination": true,
+    "qualityGate": false,
+    "competenceTracking": false,
+    "memoryCategories": ["ideas", "decisiones"]
+  },
+  "high": {
+    "description": "Configuración estándar para sesiones de calidad",
+    "model": "sonnet",
+    "effort": "high",
+    "rounds": 3,
+    "timeout": 180000,
+    "maxTokensPerAgent": 4000,
+    "crossPollination": true,
+    "qualityGate": true,
+    "competenceTracking": true,
+    "memoryCategories": ["ideas", "decisiones", "conclusiones", "pendientes", "arquitectura"]
+  },
+  "experimental": {
+    "description": "Máxima calidad — usa Opus, más rondas, todas las features",
+    "model": "opus",
+    "effort": "high",
+    "rounds": 4,
+    "timeout": 300000,
+    "maxTokensPerAgent": 6000,
+    "crossPollination": true,
+    "qualityGate": true,
+    "competenceTracking": true,
+    "memoryCategories": ["ideas", "decisiones", "conclusiones", "pendientes", "arquitectura"],
+    "biasAnalysis": true,
+    "speakingOrderShuffle": true
+  },
+  "quick": {
+    "description": "Sesión rápida — una sola ronda, sin extras",
+    "model": "sonnet",
+    "effort": "medium",
+    "rounds": 1,
+    "timeout": 90000,
+    "maxTokensPerAgent": 1500,
+    "crossPollination": false,
+    "qualityGate": false,
+    "competenceTracking": false,
+    "memoryCategories": ["ideas"]
+  }
+}

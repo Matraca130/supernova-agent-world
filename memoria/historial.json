@@ -1,0 +1,53 @@
+[
+  {
+    "id": 1,
+    "date": "10/3/2026",
+    "topic": "Como mejorar la integracion de IA en Axon",
+    "ideas": [
+      "LearningEvent como tipo fundacional que capture toda interacción con granularidad incluyendo confidenceLevel, responseTimeMs y eliminatedOptions",
+      "Grafo dirigido competency-graph.ts con aristas tipadas entre keywords que reemplaza el array plano relatedKeywords",
+      "Endpoint /ai/next-learning-action como cerebro unificado con fallback determinístico local via learning-orchestrator.ts",
+      "Quiz encadenado adaptativo donde cada respuesta condiciona la siguiente recorriendo el competency-graph según espectro BKT",
+      "Content Assistant para profesores con validación humana obligatoria que cierra el loop datos-IA-acción docente"
+    ],
+    "decisions": [
+      "LearningEvent es prerequisito P0 de todo: ambas salas convergieron en capturar datos ricos antes de cualquier feature de IA",
+      "El budget de tokens se gestiona server-side en la Edge Function, no en AppContext del frontend donde un refresh lo resetearía",
+      "TeachBackCard explica-a-la-IA como v1 en vez de peer-to-peer social, dejando el modelo social como visión futura sin timeline"
+    ]
+  },
+  {
+    "id": 2,
+    "date": "10/3/2026",
+    "topic": "Como mejorar este sistema de multi-agent chat? Tienen acceso al codigo y arquitectura completa en el contexto. Propongan mejoras concretas al orchestrator, vector store, prompts, y experiencia. Al final generen prompts de accion para implementar las mejoras.",
+    "ideas": [
+      "Pipeline tipada end-to-end con SessionTypes, Checkpoints estructurados y action-items.json en vez de markdown libre",
+      "Agent-Invoker con dual-path retry y ronda 1 en paralelo con Promise.all para ahorrar 30% del tiempo",
+      "Cierre automático de action items por git commits más SM-2 lite para competencias de agentes",
+      "Rotación de orden de agentes entre rondas más quality gate observacional con métricas",
+      "Report post-sesión con session-report.md y prompt versioning para correlacionar cambios con calidad"
+    ],
+    "decisions": [
+      "Implementar primero ronda 1 en paralelo, rotación de orden y métricas básicas como quick wins en orchestrator-v2.cjs",
+      "Quality gate arranca en modo observacional sin bloqueo, calibrar thresholds después de 5-10 sesiones con datos reales",
+      "Competencias de agentes estáticas en Fase 1, SM-2 dinámico en Fase 3, índice semántico solo si se demuestra necesario"
+    ]
+  },
+  {
+    "id": 3,
+    "date": "10/3/2026",
+    "topic": "Como mejorar la integracion de IA en Axon",
+    "ideas": [
+      "EventBus + Inferencia de Confianza Implícita: sistema de telemetría que captura interacciones, enriquece con confianza implícita y gobierna FSRS/BKT",
+      "Flashcards Polimórficas: 4 templates determinísticos sin IA + 3 generados por IA, con DifferentialCard basada en confusion_edges",
+      "ConfusionGraph con Cold-Start Poblacional: tabla confusion_edges que mapea co-errores keyword↔keyword con datos poblacionales para estudiantes nuevos",
+      "InsightDigest con Fallback Determinístico: digest de 4 secciones (Strength, Attention, Pattern, NextAction) con fallback para cold-start sin IA",
+      "Learner Profile + AI Orchestrator: facade client-side con 5 arquetipos heurísticos que decide cuándo llamar IA (shouldCallAI=false para cold-start)"
+    ],
+    "decisions": [
+      "El slider de confianza es solo dato metacognitivo; impliedConfidence (señales implícitas) es lo que entra al loop de scheduling, nunca el slider",
+      "80% funciona sin IA: FSRS + BKT + templates determinísticos son el camino feliz, React Query es la única capa de estado para IA",
+      "Eventos primero, features después: PR-1 (tipos fundacionales) se mergea primero, todo downstream depende de learning_events fluyendo"
+    ]
+  }
+]

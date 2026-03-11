@@ -1,0 +1,80 @@
+{
+  "arquitecto": {
+    "domains": [
+      "orchestrator",
+      "architecture",
+      "modules",
+      "types"
+    ],
+    "easeFactor": 2.8,
+    "interval": 16,
+    "repetitions": 3,
+    "quality": 5,
+    "lastReview": "2026-03-10"
+  },
+  "teach-leader": {
+    "domains": [
+      "quality",
+      "patterns",
+      "validation",
+      "testing"
+    ],
+    "easeFactor": 2.8,
+    "interval": 16,
+    "repetitions": 3,
+    "quality": 5,
+    "lastReview": "2026-03-10"
+  },
+  "experto-quiz": {
+    "domains": [
+      "quiz",
+      "adaptive",
+      "metrics",
+      "assessment"
+    ],
+    "easeFactor": 2.8,
+    "interval": 16,
+    "repetitions": 3,
+    "quality": 5,
+    "lastReview": "2026-03-10"
+  },
+  "experto-flashcards": {
+    "domains": [
+      "flashcards",
+      "spaced-repetition",
+      "parsing",
+      "sm2"
+    ],
+    "easeFactor": 2.8,
+    "interval": 16,
+    "repetitions": 3,
+    "quality": 5,
+    "lastReview": "2026-03-10"
+  },
+  "experto-resumen": {
+    "domains": [
+      "summary",
+      "synthesis",
+      "content",
+      "formatting"
+    ],
+    "easeFactor": 2.8,
+    "interval": 16,
+    "repetitions": 3,
+    "quality": 5,
+    "lastReview": "2026-03-10"
+  },
+  "experto-organizador": {
+    "domains": [
+      "dashboard",
+      "organization",
+      "git",
+      "scheduling"
+    ],
+    "easeFactor": 2.8,
+    "interval": 16,
+    "repetitions": 3,
+    "quality": 5,
+    "lastReview": "2026-03-10"
+  }
+}

@@ -1,0 +1,135 @@
+Eres experto-organizador, parte de un panel de expertos del proyecto Axon.
+
+HISTORIAL DE LA DISCUSION:
+# Chat Room - Agentes Axon
+> Sesion: 10/3/2026, 5:33:21 a.m.
+> Tema: Como mejorar la integracion de IA en Axon
+> Participantes: arquitecto, teach-leader, experto-quiz, experto-resumen, experto-flashcards, experto-organizador
+> Calidad: high (modelo: opus, esfuerzo: high)
+
+---
+
+## Tema de discusion
+Como mejorar la integracion de IA en Axon
+
+---
+
+### [5:33:21 a.m.] arquitecto:
+[Error: arquitecto no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-arquitecto.txt" | claude -p --agent "arquitecto" --model opus --effort high --tools ""
+'cat' n�o � reconhecido co]
+
+---
+
+### [5:33:21 a.m.] teach-leader:
+[Error: teach-leader no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-teach-leader.txt" | claude -p --agent "teach-leader" --model opus --effort high --tools ""
+'cat' n�o � reconhecid]
+
+---
+
+### [5:33:21 a.m.] experto-quiz:
+[Error: experto-quiz no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-experto-quiz.txt" | claude -p --agent "experto-quiz" --model opus --effort high --tools ""
+'cat' n�o � reconhecid]
+
+---
+
+### [5:33:21 a.m.] experto-resumen:
+[Error: experto-resumen no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-experto-resumen.txt" | claude -p --agent "experto-resumen" --model opus --effort high --tools ""
+'cat' n�o � reco]
+
+---
+
+### [5:33:21 a.m.] experto-flashcards:
+[Error: experto-flashcards no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-experto-flashcards.txt" | claude -p --agent "experto-flashcards" --model opus --effort high --tools ""
+'cat' n�o ]
+
+---
+
+### [5:33:21 a.m.] experto-organizador:
+[Error: experto-organizador no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-experto-organizador.txt" | claude -p --agent "experto-organizador" --model opus --effort high --tools ""
+'cat' n�]
+
+---
+
+### [5:33:21 a.m.] arquitecto:
+[Error: arquitecto no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-arquitecto.txt" | claude -p --agent "arquitecto" --model opus --effort high --tools ""
+'cat' n�o � reconhecido co]
+
+---
+
+### [5:33:21 a.m.] teach-leader:
+[Error: teach-leader no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-teach-leader.txt" | claude -p --agent "teach-leader" --model opus --effort high --tools ""
+'cat' n�o � reconhecid]
+
+---
+
+### [5:33:21 a.m.] experto-quiz:
+[Error: experto-quiz no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-experto-quiz.txt" | claude -p --agent "experto-quiz" --model opus --effort high --tools ""
+'cat' n�o � reconhecid]
+
+---
+
+### [5:33:21 a.m.] experto-resumen:
+[Error: experto-resumen no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-experto-resumen.txt" | claude -p --agent "experto-resumen" --model opus --effort high --tools ""
+'cat' n�o � reco]
+
+---
+
+### [5:33:21 a.m.] experto-flashcards:
+[Error: experto-flashcards no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-experto-flashcards.txt" | claude -p --agent "experto-flashcards" --model opus --effort high --tools ""
+'cat' n�o ]
+
+---
+
+### [5:33:21 a.m.] experto-organizador:
+[Error: experto-organizador no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-experto-organizador.txt" | claude -p --agent "experto-organizador" --model opus --effort high --tools ""
+'cat' n�]
+
+---
+
+### [5:33:21 a.m.] arquitecto:
+[Error: arquitecto no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-arquitecto.txt" | claude -p --agent "arquitecto" --model opus --effort high --tools ""
+'cat' n�o � reconhecido co]
+
+---
+
+### [5:33:21 a.m.] teach-leader:
+[Error: teach-leader no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-teach-leader.txt" | claude -p --agent "teach-leader" --model opus --effort high --tools ""
+'cat' n�o � reconhecid]
+
+---
+
+### [5:33:21 a.m.] experto-quiz:
+[Error: experto-quiz no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-experto-quiz.txt" | claude -p --agent "experto-quiz" --model opus --effort high --tools ""
+'cat' n�o � reconhecid]
+
+---
+
+### [5:33:21 a.m.] experto-resumen:
+[Error: experto-resumen no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-experto-resumen.txt" | claude -p --agent "experto-resumen" --model opus --effort high --tools ""
+'cat' n�o � reco]
+
+---
+
+### [5:33:21 a.m.] experto-flashcards:
+[Error: experto-flashcards no respondio - Command failed: cat "C:\Users\petri\numero1_sseki_2325_55\multi-agent-chat\.tmp-prompt-experto-flashcards.txt" | claude -p --agent "experto-flashcards" --model opus --effort high --tools ""
+'cat' n�o ]
+
+---
+
+
+
+CONTEXTO:
+- Ronda 3 de 3
+- Otros panelistas: arquitecto, teach-leader, experto-quiz, experto-resumen, experto-flashcards
+
+TU TAREA:
+Lee lo que dijeron los demas y RESPONDE DIRECTAMENTE:
+- Si estas de acuerdo con algo, AMPLIFICA la idea con detalles concretos de implementacion
+- Si NO estas de acuerdo, di POR QUE y propone una alternativa mejor
+- Conecta ideas de diferentes agentes que podrian funcionar juntas
+- Propone algo NUEVO que nadie haya mencionado
+- Se especifico: menciona archivos, componentes, hooks, servicios reales de Axon
+- Desafia las ideas debiles con argumentos tecnicos
+
+NO repitas lo que ya se dijo. NO seas diplomatico. Se honesto y creativo.
+Maximo 500 palabras. Responde SOLO con texto.

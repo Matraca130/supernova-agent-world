@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-Agent Debate — Live Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0a0a0f;
+    color: #e0e0e0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    padding: 16px 24px;
+    border-bottom: 1px solid #2a2a4a;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .header h1 {
+    font-size: 20px;
+    color: #7c83ff;
+    font-weight: 600;
+  }
+  .header .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #888;
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #444;
+    transition: background 0.3s;
+  }
+  .status-dot.live { background: #4ade80; animation: pulse 2s infinite; }
+  .status-dot.ended { background: #f87171; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* Topic bar */
+  .topic-bar {
+    background: #111122;
+    padding: 12px 24px;
+    border-bottom: 1px solid #222244;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .topic { font-size: 16px; color: #c8c8ff; font-weight: 500; }
+  .meta { font-size: 12px; color: #666; display: flex; gap: 16px; }
+  .meta span { display: flex; align-items: center; gap: 4px; }
+
+  /* Participants */
+  .participants-bar {
+    background: #0d0d1a;
+    padding: 8px 24px;
+    border-bottom: 1px solid #1a1a33;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .participant-chip {
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid;
+  }
+  /* Dynamic colors via JS */
+
+  /* Chat area */
+  .chat-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    scroll-behavior: smooth;
+  }
+  .chat-area::-webkit-scrollbar { width: 6px; }
+  .chat-area::-webkit-scrollbar-track { background: transparent; }
+  .chat-area::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+  /* Messages */
+  .message {
+    display: flex;
+    gap: 12px;
+    animation: fadeIn 0.4s ease-out;
+    max-width: 85%;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .message-avatar {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+    flex-shrink: 0;
+    color: #fff;
+  }
+  .message-content {
+    background: #14142a;
+    border: 1px solid #222244;
+    border-radius: 12px;
+    padding: 10px 14px;
+    min-width: 200px;
+  }
+  .message-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .message-name {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .message-time {
+    font-size: 11px;
+    color: #555;
+  }
+  .message-round {
+    font-size: 10px;
+    color: #555;
+    background: #1a1a33;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 8px;
+  }
+  .message-text {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #ccc;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* Round divider */
+  .round-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    color: #555;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .round-divider::before, .round-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, transparent, #333, transparent);
+  }
+
+  /* No debate state */
+  .no-debate {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: #444;
+  }
+  .no-debate .icon { font-size: 48px; }
+  .no-debate p { font-size: 16px; }
+  .no-debate code {
+    background: #1a1a2e;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #7c83ff;
+  }
+
+  /* Synthesis */
+  .synthesis {
+    background: linear-gradient(135deg, #1a2a1a, #1a1a2e);
+    border: 1px solid #2a4a2a;
+    border-radius: 12px;
+    padding: 16px;
+    margin: 8px 0;
+  }
+  .synthesis h3 {
+    color: #4ade80;
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+  .synthesis p {
+    color: #aaa;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* Footer */
+  .footer {
+    background: #111122;
+    padding: 10px 24px;
+    border-top: 1px solid #222244;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: #555;
+  }
+  .footer .live-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Multi-Agent Debate</h1>
+  <div class="status">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">Connecting...</span>
+  </div>
+</div>
+
+<div class="topic-bar" id="topicBar" style="display:none">
+  <span class="topic" id="topicText"></span>
+  <div class="meta">
+    <span id="roundInfo"></span>
+    <span id="msgCount"></span>
+  </div>
+</div>
+
+<div class="participants-bar" id="participantsBar" style="display:none"></div>
+
+<div class="chat-area" id="chatArea">
+  <div class="no-debate" id="noDebate">
+    <div class="icon">&#128172;</div>
+    <p>No hay debate activo</p>
+    <code>Usa "iniciar_debate" desde un MCP client</code>
+  </div>
+</div>
+
+<div class="footer">
+  <div class="live-indicator">
+    <div class="status-dot" id="footerDot"></div>
+    <span id="footerText">Dashboard en tiempo real</span>
+  </div>
+  <span id="lastUpdate"></span>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+const POLL_INTERVAL = 1500; // 1.5 seconds
+
+// Participant colors
+const COLORS = [
+  { bg: '#2a1a4a', border: '#6c5ce7', text: '#a29bfe', avatar: '#6c5ce7' },
+  { bg: '#1a2a4a', border: '#0984e3', text: '#74b9ff', avatar: '#0984e3' },
+  { bg: '#1a4a2a', border: '#00b894', text: '#55efc4', avatar: '#00b894' },
+  { bg: '#4a2a1a', border: '#e17055', text: '#fab1a0', avatar: '#e17055' },
+  { bg: '#4a1a3a', border: '#e84393', text: '#fd79a8', avatar: '#e84393' },
+  { bg: '#3a3a1a', border: '#fdcb6e', text: '#ffeaa7', avatar: '#d4a017' },
+  { bg: '#1a3a3a', border: '#00cec9', text: '#81ecec', avatar: '#00cec9' },
+  { bg: '#2a2a2a', border: '#636e72', text: '#b2bec3', avatar: '#636e72' },
+];
+
+const participantColorMap = {};
+let colorIndex = 0;
+let lastMessageCount = 0;
+let lastRound = 0;
+let currentDebateId = null;
+
+function getColor(name) {
+  if (!participantColorMap[name]) {
+    participantColorMap[name] = COLORS[colorIndex % COLORS.length];
+    colorIndex++;
+  }
+  return participantColorMap[name];
+}
+
+function getInitials(name) {
+  return name.split('-').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+}
+
+function timeAgo(ts) {
+  const d = new Date(ts);
+  return d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function setStatus(status) {
+  const dot = document.getElementById('statusDot');
+  const footerDot = document.getElementById('footerDot');
+  const text = document.getElementById('statusText');
+
+  if (status === 'live') {
+    dot.className = 'status-dot live';
+    footerDot.className = 'status-dot live';
+    text.textContent = 'En vivo';
+    text.style.color = '#4ade80';
+  } else if (status === 'ended') {
+    dot.className = 'status-dot ended';
+    footerDot.className = 'status-dot ended';
+    text.textContent = 'Finalizado';
+    text.style.color = '#f87171';
+  } else {
+    dot.className = 'status-dot';
+    footerDot.className = 'status-dot';
+    text.textContent = 'Sin debate';
+    text.style.color = '#888';
+  }
+}
+
+function renderParticipants(participants) {
+  const bar = document.getElementById('participantsBar');
+  bar.style.display = 'flex';
+  bar.innerHTML = '<span style="font-size:12px;color:#555;margin-right:4px">Participantes:</span>';
+
+  participants.forEach(p => {
+    const color = getColor(p.name || p);
+    const name = p.name || p;
+    const chip = document.createElement('span');
+    chip.className = 'participant-chip';
+    chip.style.background = color.bg;
+    chip.style.borderColor = color.border;
+    chip.style.color = color.text;
+    chip.textContent = name + (p.role && p.role !== 'participante' ? ` (${p.role})` : '');
+    bar.appendChild(chip);
+  });
+}
+
+function addRoundDivider(round) {
+  const chat = document.getElementById('chatArea');
+  const div = document.createElement('div');
+  div.className = 'round-divider';
+  div.textContent = `Ronda ${round}`;
+  chat.appendChild(div);
+}
+
+function addMessage(msg) {
+  const chat = document.getElementById('chatArea');
+  const color = getColor(msg.participantName);
+
+  const el = document.createElement('div');
+  el.className = 'message';
+  el.innerHTML = `
+    <div class="message-avatar" style="background:${color.avatar}">${getInitials(msg.participantName)}</div>
+    <div class="message-content" style="border-color:${color.border}40">
+      <div class="message-header">
+        <span class="message-name" style="color:${color.text}">${msg.participantName}</span>
+        <span>
+          <span class="message-time">${timeAgo(msg.timestamp)}</span>
+          <span class="message-round">R${msg.round}</span>
+        </span>
+      </div>
+      <div class="message-text">${escapeHtml(msg.text)}</div>
+    </div>
+  `;
+  chat.appendChild(el);
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function scrollToBottom() {
+  const chat = document.getElementById('chatArea');
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function poll() {
+  try {
+    const res = await fetch(`${API_BASE}/api/debate/live`);
+    if (!res.ok) throw new Error('Server error');
+
+    const data = await res.json();
+
+    if (!data.debate) {
+      setStatus('idle');
+      document.getElementById('topicBar').style.display = 'none';
+      document.getElementById('participantsBar').style.display = 'none';
+      document.getElementById('noDebate').style.display = 'flex';
+      document.getElementById('lastUpdate').textContent = `Actualizado: ${new Date().toLocaleTimeString()}`;
+      return;
+    }
+
+    const d = data.debate;
+    document.getElementById('noDebate').style.display = 'none';
+
+    // Topic bar
+    document.getElementById('topicBar').style.display = 'flex';
+    document.getElementById('topicText').textContent = d.topic;
+    document.getElementById('roundInfo').textContent = `Ronda ${d.currentRound}/${d.maxRounds}`;
+    document.getElementById('msgCount').textContent = `${d.messages.length} mensajes`;
+
+    // Status
+    setStatus(d.status === 'active' ? 'live' : 'ended');
+
+    // Participants
+    if (d.participants.length > 0) {
+      renderParticipants(d.participants);
+    }
+
+    // New debate? Reset chat
+    if (d.id !== currentDebateId) {
+      currentDebateId = d.id;
+      lastMessageCount = 0;
+      lastRound = 0;
+      document.getElementById('chatArea').innerHTML = '';
+    }
+
+    // New messages
+    if (d.messages.length > lastMessageCount) {
+      const newMsgs = d.messages.slice(lastMessageCount);
+
+      for (const msg of newMsgs) {
+        if (msg.round > lastRound) {
+          addRoundDivider(msg.round);
+          lastRound = msg.round;
+        }
+        addMessage(msg);
+      }
+
+      lastMessageCount = d.messages.length;
+      scrollToBottom();
+    }
+
+    // Synthesis
+    if (d.status === 'finished' && d.synthesis) {
+      if (!document.getElementById('synthesis')) {
+        const synth = document.createElement('div');
+        synth.id = 'synthesis';
+        synth.className = 'synthesis';
+        synth.innerHTML = `<h3>Sintesis Final</h3><p>${escapeHtml(d.synthesis)}</p>`;
+        document.getElementById('chatArea').appendChild(synth);
+        scrollToBottom();
+      }
+    }
+
+    document.getElementById('lastUpdate').textContent = `Actualizado: ${new Date().toLocaleTimeString()}`;
+
+  } catch (err) {
+    console.error('Poll error:', err);
+    document.getElementById('footerText').textContent = 'Error de conexion - reintentando...';
+  }
+}
+
+// Start polling
+poll();
+setInterval(poll, POLL_INTERVAL);
+</script>
+
+</body>
+</html>

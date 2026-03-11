@@ -1,0 +1,1767 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-Agent Debate Dashboard v2</title>
+<style>
+  :root {
+    --bg-primary: #0a0a0f;
+    --bg-secondary: #0d0d1a;
+    --bg-tertiary: #111122;
+    --border-color: #1a1a33;
+    --text-primary: #e0e0e0;
+    --text-secondary: #999;
+    --accent-blue: #7c83ff;
+    --accent-green: #4ade80;
+    --accent-yellow: #fdcb6e;
+    --accent-red: #f87171;
+    --role-architect: #6c5ce7;
+    --role-critic: #e17055;
+    --role-founder: #00b894;
+    --role-security: #d63031;
+    --role-junior: #74b9ff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ─── NAV BAR ──────────────────────────────────────────────────────── */
+  .nav-bar {
+    background: #08080d;
+    border-bottom: 1px solid var(--border-color);
+    padding: 6px 24px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .nav-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+  .nav-link:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+  .nav-link.active { color: var(--accent-blue); background: rgba(124,131,255,0.1); }
+
+  /* ─── HEADER ─────────────────────────────────────────────────────────── */
+  .header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .header h1 {
+    font-size: 22px;
+    color: var(--accent-blue);
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  .header-stats {
+    display: flex;
+    gap: 16px;
+    font-size: 13px;
+  }
+
+  .stat-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .stat-label {
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .stat-value {
+    color: var(--accent-blue);
+    font-weight: 600;
+    font-size: 16px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #444;
+    transition: background 0.3s;
+  }
+
+  .status-dot.live {
+    background: var(--accent-green);
+    animation: pulse 2s infinite;
+  }
+
+  .status-dot.ended {
+    background: var(--accent-red);
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* ─── SESSION SWITCHER BAR ────────────────────────────────────────────── */
+  .session-bar {
+    background: var(--bg-secondary);
+    padding: 10px 24px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .session-bar-btn {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: border-color 0.2s;
+  }
+
+  .session-bar-btn:hover { border-color: var(--accent-blue); }
+
+  .session-bar-name {
+    font-size: 13px;
+    color: var(--text-primary);
+    font-weight: 600;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .session-bar-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  /* ─── SESSION INFO BAR ──────────────────────────────────────────────── */
+  .session-info-bar {
+    background: var(--bg-tertiary);
+    padding: 8px 24px;
+    border-bottom: 1px solid var(--border-color);
+    display: none;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .session-info-bar.visible { display: flex; }
+
+  .info-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(124, 131, 255, 0.12);
+    color: var(--accent-blue);
+    border: 1px solid rgba(124, 131, 255, 0.2);
+  }
+
+  .info-chip.green { background: rgba(74,222,128,0.12); color: var(--accent-green); border-color: rgba(74,222,128,0.2); }
+  .info-chip.yellow { background: rgba(253,203,110,0.12); color: var(--accent-yellow); border-color: rgba(253,203,110,0.2); }
+  .info-chip.red { background: rgba(248,113,113,0.12); color: var(--accent-red); border-color: rgba(248,113,113,0.2); }
+
+  .inline-phases {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+  }
+
+  .inline-phase-dot {
+    width: 32px;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--border-color);
+    transition: background 0.3s;
+  }
+
+  .inline-phase-dot.completed { background: var(--accent-green); }
+  .inline-phase-dot.active { background: var(--accent-blue); box-shadow: 0 0 6px var(--accent-blue); }
+
+  /* ─── SESSION DRAWER ────────────────────────────────────────────────── */
+  .drawer-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+  }
+
+  .drawer-overlay.open { opacity: 1; pointer-events: auto; }
+
+  .session-drawer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 320px;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    z-index: 101;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .session-drawer.open { transform: translateX(0); }
+
+  .drawer-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .drawer-header h2 {
+    font-size: 15px;
+    color: var(--accent-blue);
+    font-weight: 600;
+  }
+
+  .drawer-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+
+  .drawer-close:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+
+  .drawer-stats {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    gap: 16px;
+  }
+
+  .drawer-stat {
+    flex: 1;
+    text-align: center;
+  }
+
+  .drawer-stat-val {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent-blue);
+  }
+
+  .drawer-stat-lbl {
+    font-size: 10px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .drawer-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .drawer-item {
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+    margin-bottom: 4px;
+    border: 1px solid transparent;
+  }
+
+  .drawer-item:hover { background: var(--bg-tertiary); }
+  .drawer-item.active { background: var(--bg-tertiary); border-color: var(--accent-blue); }
+
+  .drawer-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .drawer-item-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #555;
+    flex-shrink: 0;
+  }
+
+  .drawer-item-dot.live { background: var(--accent-green); animation: pulse 2s infinite; }
+
+  .drawer-item-topic {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .drawer-item-badge {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+
+  .drawer-item-badge.active { background: rgba(74,222,128,0.15); color: var(--accent-green); }
+  .drawer-item-badge.ended { background: rgba(153,153,153,0.15); color: var(--text-secondary); }
+
+  .drawer-item-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 10px;
+    color: var(--text-secondary);
+    padding-left: 15px;
+  }
+
+  /* ─── SESSION STATS CARD ────────────────────────────────────────────── */
+  .session-stats-section { margin-top: 16px; }
+
+  .mini-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    font-size: 11px;
+  }
+
+  .mini-bar-label {
+    width: 28px;
+    color: var(--text-secondary);
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .mini-bar-track {
+    flex: 1;
+    height: 14px;
+    background: var(--bg-primary);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .mini-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    padding-left: 4px;
+    font-size: 9px;
+    color: #fff;
+    font-weight: 600;
+    transition: width 0.3s;
+  }
+
+  .agent-timeline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    margin-top: 8px;
+  }
+
+  .timeline-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    transition: transform 0.15s;
+  }
+
+  .timeline-dot:hover { transform: scale(1.4); }
+
+  @media (max-width: 768px) {
+    .session-drawer { width: 100%; }
+    .session-bar-meta { display: none; }
+  }
+
+  /* ─── MAIN LAYOUT ─────────────────────────────────────────────────────── */
+  .main-layout {
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr;
+    gap: 0;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .panel {
+    border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+    padding: 16px;
+  }
+
+  .panel:last-child {
+    border-right: none;
+  }
+
+  .panel::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .panel::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .panel::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 3px;
+  }
+
+  /* ─── PHASE PROGRESS ──────────────────────────────────────────────────── */
+  .phase-section {
+    margin-bottom: 24px;
+  }
+
+  .phase-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+
+  .phase-progress {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .phase-dot {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border-color);
+    transition: all 0.3s;
+  }
+
+  .phase-dot.completed {
+    background: var(--accent-green);
+  }
+
+  .phase-dot.active {
+    background: var(--accent-blue);
+    box-shadow: 0 0 8px var(--accent-blue);
+  }
+
+  .phase-info {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+
+  .phase-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent-blue);
+    margin-bottom: 4px;
+  }
+
+  .phase-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+  }
+
+  /* ─── INTENSITY BADGE ────────────────────────────────────────────────── */
+  .intensity-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 16px;
+  }
+
+  .intensity-casual {
+    background: rgba(74, 222, 128, 0.15);
+    color: var(--accent-green);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+  }
+
+  .intensity-moderado {
+    background: rgba(253, 203, 110, 0.15);
+    color: var(--accent-yellow);
+    border: 1px solid rgba(253, 203, 110, 0.3);
+  }
+
+  .intensity-adversarial {
+    background: rgba(248, 113, 113, 0.15);
+    color: var(--accent-red);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+  }
+
+  /* ─── ROUND COUNTER ──────────────────────────────────────────────────── */
+  .round-counter {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+    margin-bottom: 16px;
+  }
+
+  .round-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+
+  .round-number {
+    font-size: 32px;
+    font-weight: bold;
+    color: var(--accent-blue);
+  }
+
+  /* ─── PARTICIPANTS PANEL ─────────────────────────────────────────────── */
+  .participants-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .participant-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--accent-blue);
+    border-radius: 8px;
+    padding: 12px;
+    transition: all 0.3s;
+  }
+
+  .participant-card:hover {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 12px rgba(124, 131, 255, 0.1);
+  }
+
+  .participant-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .participant-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    color: #fff;
+    background: var(--accent-blue);
+  }
+
+  .participant-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    flex: 1;
+  }
+
+  .participant-virtual-badge {
+    font-size: 9px;
+    background: rgba(124, 131, 255, 0.2);
+    color: var(--accent-blue);
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+  }
+
+  .participant-role {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+
+  .participant-stats {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+  }
+
+  .stat {
+    flex: 1;
+  }
+
+  .stat-label-small {
+    color: var(--text-secondary);
+    margin-bottom: 2px;
+  }
+
+  .stat-value-small {
+    color: var(--accent-blue);
+    font-weight: 600;
+  }
+
+  /* ─── MESSAGES TIMELINE ──────────────────────────────────────────────── */
+  .messages-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .message-item {
+    display: flex;
+    gap: 12px;
+    animation: slideIn 0.3s ease-out;
+  }
+
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .message-avatar-small {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: bold;
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  .message-bubble {
+    flex: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px;
+  }
+
+  .message-header-small {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+
+  .message-name-small {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .message-time-small {
+    font-size: 10px;
+    color: var(--text-secondary);
+  }
+
+  .message-text-small {
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--text-primary);
+    word-break: break-word;
+  }
+
+  .message-meta {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 6px;
+    display: flex;
+    gap: 8px;
+  }
+
+  .phase-change-marker {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 8px 0;
+  }
+
+  .phase-change-marker::before,
+  .phase-change-marker::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, transparent, var(--border-color), transparent);
+  }
+
+  /* ─── STATS PANEL ────────────────────────────────────────────────────── */
+  .stats-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .stat-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+  }
+
+  .stat-card-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .bar-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .bar-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .bar-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    width: 60px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .bar-fill {
+    flex: 1;
+    height: 20px;
+    background: linear-gradient(90deg, var(--accent-blue), #7c83ff80);
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .bar-value {
+    font-size: 10px;
+    color: #fff;
+    font-weight: 600;
+    padding: 0 6px;
+    display: flex;
+    align-items: center;
+    height: 100%;
+  }
+
+  /* ─── KNOWLEDGE BASE ─────────────────────────────────────────────────── */
+  .kb-item {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+
+  .kb-item:hover {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 8px rgba(124, 131, 255, 0.1);
+  }
+
+  .kb-source {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent-blue);
+    margin-bottom: 6px;
+  }
+
+  .kb-preview {
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .kb-expanded {
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  /* ─── SITUACION STATUS ───────────────────────────────────────────────── */
+  .workflow-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .workflow-item {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .workflow-item.blocked {
+    border-color: var(--accent-red);
+    background: rgba(248, 113, 113, 0.05);
+  }
+
+  .workflow-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-green);
+  }
+
+  .workflow-item.blocked .workflow-status {
+    background: var(--accent-red);
+    animation: pulse-red 2s infinite;
+  }
+
+  @keyframes pulse-red {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .workflow-name {
+    flex: 1;
+    color: var(--text-primary);
+  }
+
+  /* ─── EMPTY STATE ────────────────────────────────────────────────────── */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 16px;
+    color: var(--text-secondary);
+  }
+
+  .empty-icon {
+    font-size: 48px;
+    opacity: 0.3;
+  }
+
+  .empty-text {
+    font-size: 14px;
+    text-align: center;
+  }
+
+  /* ─── FOOTER ─────────────────────────────────────────────────────────── */
+  .footer {
+    background: var(--bg-tertiary);
+    padding: 10px 24px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  /* ─── RESPONSIVE ─────────────────────────────────────────────────────── */
+  @media (max-width: 1200px) {
+    .main-layout {
+      grid-template-columns: 1fr 1.5fr 0.8fr;
+    }
+
+    .header-stats {
+      gap: 12px;
+      font-size: 12px;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .main-layout {
+      grid-template-columns: 1fr;
+    }
+
+    .panel {
+      border-right: none;
+      border-bottom: 1px solid var(--border-color);
+      display: none;
+    }
+
+    .panel.active {
+      display: block;
+    }
+
+    .header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .header-left {
+      flex-direction: column;
+      width: 100%;
+    }
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV BAR -->
+<div class="nav-bar">
+  <a href="/dashboard" class="nav-link">v1</a>
+  <a href="/dashboard-v2" class="nav-link active">Dashboard</a>
+  <a href="/world" class="nav-link">Agent World</a>
+</div>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-left">
+    <h1>Debate Live</h1>
+    <div class="header-stats">
+      <div class="stat-item">
+        <div class="stat-label">Status</div>
+        <div class="stat-value" id="headerStatus">Idle</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">Active Debates</div>
+        <div class="stat-value" id="headerDebateCount">0</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">Total Messages</div>
+        <div class="stat-value" id="headerMessageCount">0</div>
+      </div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-indicator">
+      <div class="status-dot" id="mainStatusDot"></div>
+      <span id="mainStatusText">Connecting...</span>
+    </div>
+  </div>
+</div>
+
+<!-- SESSION DRAWER -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+<div class="session-drawer" id="sessionDrawer">
+  <div class="drawer-header">
+    <h2>Sessions</h2>
+    <button class="drawer-close" onclick="closeDrawer()">&times;</button>
+  </div>
+  <div class="drawer-stats" id="drawerStats">
+    <div class="drawer-stat"><div class="drawer-stat-val" id="dsTotalDebates">0</div><div class="drawer-stat-lbl">Debates</div></div>
+    <div class="drawer-stat"><div class="drawer-stat-val" id="dsTotalMsgs">0</div><div class="drawer-stat-lbl">Messages</div></div>
+    <div class="drawer-stat"><div class="drawer-stat-val" id="dsAvgMsgs">0</div><div class="drawer-stat-lbl">Avg/Debate</div></div>
+  </div>
+  <div class="drawer-list" id="drawerList"></div>
+</div>
+
+<!-- SESSION SWITCHER BAR -->
+<div class="session-bar">
+  <button class="session-bar-btn" onclick="openDrawer()">&#9776; Sessions</button>
+  <div class="session-bar-name" id="sessionBarName">No session selected</div>
+  <div class="session-bar-meta" id="sessionBarMeta"></div>
+</div>
+
+<!-- SESSION INFO BAR -->
+<div class="session-info-bar" id="sessionInfoBar">
+  <div id="sessionInfoChips"></div>
+  <div class="inline-phases" id="inlinePhases"></div>
+</div>
+
+<!-- MAIN LAYOUT -->
+<div class="main-layout">
+
+  <!-- LEFT PANEL: PHASE & METRICS -->
+  <div class="panel" id="leftPanel">
+    <div id="noDebateLeft" class="empty-state">
+      <div class="empty-icon">⏱</div>
+      <div class="empty-text">No debate active</div>
+    </div>
+
+    <div id="phaseMetricsPanel" style="display:none">
+      <!-- Phase Progress -->
+      <div class="phase-section">
+        <div class="phase-title">Debate Phase</div>
+        <div class="phase-progress" id="phaseProgress"></div>
+        <div id="phaseInfo"></div>
+      </div>
+
+      <!-- Intensity -->
+      <div class="phase-section">
+        <div class="phase-title">Intensity</div>
+        <div id="intensityBadge" class="intensity-badge"></div>
+      </div>
+
+      <!-- Round Counter -->
+      <div class="phase-section">
+        <div class="round-counter">
+          <div class="round-label">Current Round</div>
+          <div class="round-number" id="roundNumber">-</div>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="phase-section">
+        <div class="stat-card-title">Messages per Agent</div>
+        <div class="bar-chart" id="messagesChart"></div>
+      </div>
+
+      <!-- Phase Duration -->
+      <div class="phase-section">
+        <div class="stat-card-title">Phase Duration</div>
+        <div id="phaseDurationDisplay" style="font-size:12px;color:var(--text-secondary)">-</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER PANEL: MESSAGES -->
+  <div class="panel" id="centerPanel">
+    <div id="noDebateCenter" class="empty-state">
+      <div class="empty-icon">💬</div>
+      <div class="empty-text">Waiting for messages...</div>
+    </div>
+
+    <div id="messagesPanel" style="display:none">
+      <div class="messages-container" id="messagesContainer"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL: PARTICIPANTS & KB -->
+  <div class="panel" id="rightPanel">
+    <div id="noDebateRight" class="empty-state">
+      <div class="empty-icon">👥</div>
+      <div class="empty-text">No participants yet</div>
+    </div>
+
+    <div id="participantsPanel" style="display:none">
+      <div class="phase-title">Participants</div>
+      <div class="participants-list" id="participantsList"></div>
+
+      <!-- Knowledge Base -->
+      <div class="phase-section" id="kbSection" style="display:none">
+        <div class="phase-title">Knowledge Base</div>
+        <div id="kbList"></div>
+      </div>
+
+      <!-- Situacion Status -->
+      <div class="phase-section" id="situacionSection" style="display:none">
+        <div class="phase-title">Workflow Status</div>
+        <div class="workflow-chart" id="workflowChart"></div>
+      </div>
+
+      <!-- Session Stats -->
+      <div class="phase-section session-stats-section" id="sessionStatsSection" style="display:none">
+        <div class="phase-title">Session Stats</div>
+        <div class="stat-card" style="margin-bottom:12px">
+          <div class="stat-card-title">Messages per Round</div>
+          <div id="msgsPerRoundChart"></div>
+        </div>
+        <div class="stat-card" style="margin-bottom:12px">
+          <div class="stat-card-title">Agent Participation</div>
+          <div id="agentParticipationChart"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-title">Agent Timeline</div>
+          <div class="agent-timeline" id="agentTimeline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- FOOTER -->
+<div class="footer">
+  <span id="footerStatus">Ready</span>
+  <span id="lastUpdate">Updated: -</span>
+</div>
+
+<script>
+  // ── CONFIG ───────────────────────────────────────────────────────────
+  const API_BASE = window.location.origin;
+  const POLL_INTERVAL = 3000;
+  const SESSION_POLL_INTERVAL = 10000;
+
+  // ── COLOR PALETTE ────────────────────────────────────────────────────
+  const ROLE_COLORS = {
+    'arquitecto-software': '#6c5ce7',
+    'critico-tecnico': '#e17055',
+    'ship-fast-founder': '#00b894',
+    'security-hardliner': '#d63031',
+    'junior-dev-mantenedor': '#74b9ff',
+    'medico-clinico': '#6c5ce7',
+    'investigador-radical': '#e17055',
+    'paciente-advocate': '#00b894',
+    'eticista': '#fdcb6e',
+    'cost-optimizer': '#d63031',
+    'defensor': '#74b9ff',
+    'devils-advocate': '#e17055',
+    'mediador-provocador': '#00b894',
+  };
+
+  const DEFAULT_COLORS = [
+    '#6c5ce7', '#0984e3', '#00b894', '#e17055',
+    '#e84393', '#fdcb6e', '#00cec9', '#636e72'
+  ];
+
+  // ── STATE ────────────────────────────────────────────────────────────
+  let currentDebate = null;
+  let sessions = [];
+  let selectedSessionId = null;
+  let participantColorMap = {};
+  let colorIndex = 0;
+  let lastMessageCount = 0;
+  let phaseStartTime = null;
+
+  // ── UTILITIES ────────────────────────────────────────────────────────
+  function getInitials(name) {
+    return name.split('-').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  }
+
+  function getColor(name) {
+    if (!participantColorMap[name]) {
+      const roleColor = ROLE_COLORS[name];
+      const color = roleColor || DEFAULT_COLORS[colorIndex % DEFAULT_COLORS.length];
+      participantColorMap[name] = color;
+      if (!roleColor) colorIndex++;
+    }
+    return participantColorMap[name];
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function formatTime(ts) {
+    const d = new Date(ts);
+    return d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function formatDate(ts) {
+    const d = new Date(ts);
+    return d.toLocaleDateString('es', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function getWordCount(text) {
+    return text.trim().split(/\s+/).length;
+  }
+
+  function formatDuration(ms) {
+    const sec = Math.floor(ms / 1000);
+    const min = Math.floor(sec / 60);
+    const hr = Math.floor(min / 60);
+    if (hr > 0) return `${hr}h ${min % 60}m`;
+    if (min > 0) return `${min}m ${sec % 60}s`;
+    return `${sec}s`;
+  }
+
+  function formatDurationSec(seconds) {
+    return formatDuration(seconds * 1000);
+  }
+
+  // ── DRAWER ───────────────────────────────────────────────────────────
+  function openDrawer() {
+    document.getElementById('drawerOverlay').classList.add('open');
+    document.getElementById('sessionDrawer').classList.add('open');
+  }
+
+  function closeDrawer() {
+    document.getElementById('drawerOverlay').classList.remove('open');
+    document.getElementById('sessionDrawer').classList.remove('open');
+  }
+
+  // ── FETCH SESSIONS ───────────────────────────────────────────────────
+  async function fetchSessions() {
+    try {
+      const [sessRes, statsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/sessions`),
+        fetch(`${API_BASE}/api/sessions/stats`)
+      ]);
+      if (sessRes.ok) {
+        const data = await sessRes.json();
+        sessions = data.sessions || [];
+        renderSessionDrawer();
+      }
+      if (statsRes.ok) {
+        const stats = await statsRes.json();
+        document.getElementById('dsTotalDebates').textContent = stats.totalDebates || 0;
+        document.getElementById('dsTotalMsgs').textContent = stats.totalMessages || 0;
+        document.getElementById('dsAvgMsgs').textContent = stats.avgMessagesPerDebate || 0;
+        document.getElementById('headerDebateCount').textContent = stats.totalDebates || 0;
+      }
+    } catch (e) {
+      console.error('fetchSessions error:', e);
+    }
+  }
+
+  function renderSessionDrawer() {
+    const list = document.getElementById('drawerList');
+    list.innerHTML = '';
+
+    if (sessions.length === 0) {
+      list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:13px">No sessions yet</div>';
+      return;
+    }
+
+    sessions.forEach(s => {
+      const item = document.createElement('div');
+      item.className = 'drawer-item';
+      if (selectedSessionId === s.id) item.classList.add('active');
+
+      const isActive = s.status === 'active';
+      item.innerHTML = `
+        <div class="drawer-item-header">
+          <div class="drawer-item-dot ${isActive ? 'live' : ''}"></div>
+          <div class="drawer-item-topic">${escapeHtml(s.topic || 'Untitled')}</div>
+          <div class="drawer-item-badge ${isActive ? 'active' : 'ended'}">${isActive ? 'Live' : 'Ended'}</div>
+        </div>
+        <div class="drawer-item-meta">
+          <span>${s.messageCount || 0} msgs</span>
+          <span>R${s.currentRound || 0}/${s.maxRounds || '?'}</span>
+          <span>${formatDate(s.createdAt)}</span>
+        </div>
+      `;
+      item.addEventListener('click', () => loadSession(s.id));
+      list.appendChild(item);
+    });
+  }
+
+  // ── LOAD SESSION ─────────────────────────────────────────────────────
+  async function loadSession(id) {
+    selectedSessionId = id;
+    closeDrawer();
+
+    try {
+      const res = await fetch(`${API_BASE}/api/sessions/${id}`);
+      if (!res.ok) throw new Error('Session not found');
+      const data = await res.json();
+
+      // Reset state for new session
+      lastMessageCount = 0;
+      phaseStartTime = null;
+      participantColorMap = {};
+      colorIndex = 0;
+      document.getElementById('messagesContainer').innerHTML = '';
+
+      // Build a unified debate object for rendering
+      const debate = {
+        ...data.debate,
+        messages: data.messages || [],
+        participants: data.participants || [],
+        knowledgeBase: data.knowledgeBase || [],
+        synthesis: data.synthesis,
+        phases: data.phases || [],
+      };
+
+      currentDebate = debate;
+
+      // Update session bar
+      document.getElementById('sessionBarName').textContent = debate.topic || 'Untitled';
+      const meta = document.getElementById('sessionBarMeta');
+      meta.innerHTML = `
+        <span>${(debate.messages || []).length} msgs</span>
+        <span>${formatDurationSec(data.stats?.duration || 0)}</span>
+      `;
+
+      // Update session info bar
+      renderSessionInfoBar(debate, data.stats);
+
+      // Update status
+      setStatus(debate.status === 'active' ? 'live' : 'ended');
+      document.getElementById('headerStatus').textContent = debate.status === 'active' ? 'Live' : 'Ended';
+      document.getElementById('headerMessageCount').textContent = debate.messages.length;
+
+      // Show panels
+      document.getElementById('noDebateLeft').style.display = 'none';
+      document.getElementById('phaseMetricsPanel').style.display = 'block';
+      document.getElementById('noDebateCenter').style.display = 'none';
+      document.getElementById('messagesPanel').style.display = 'block';
+      document.getElementById('noDebateRight').style.display = 'none';
+      document.getElementById('participantsPanel').style.display = 'block';
+
+      // Render
+      renderPhaseProgress(debate);
+      renderIntensity(debate.intensity);
+      document.getElementById('roundNumber').textContent = `${debate.currentRound || debate.round || '-'}/${debate.maxRounds || debate.totalRounds || '-'}`;
+      renderParticipants(debate);
+      renderMessagesChart(debate);
+      renderMessages(debate, 0);
+      lastMessageCount = debate.messages.length;
+      renderKnowledgeBase(debate);
+      renderSituacion(debate);
+      renderSessionStats(debate, data.stats);
+
+      // Highlight in drawer
+      renderSessionDrawer();
+
+    } catch (e) {
+      console.error('loadSession error:', e);
+    }
+  }
+
+  // ── SESSION INFO BAR ─────────────────────────────────────────────────
+  function renderSessionInfoBar(debate, stats) {
+    const bar = document.getElementById('sessionInfoBar');
+    bar.classList.add('visible');
+
+    const chips = document.getElementById('sessionInfoChips');
+    const intensityClass = { casual: 'green', moderado: 'yellow', adversarial: 'red' }[debate.intensity] || '';
+    chips.innerHTML = `
+      <span class="info-chip">#${debate.id || '?'}</span>
+      <span class="info-chip">${escapeHtml(debate.category || 'general')}</span>
+      <span class="info-chip ${intensityClass}">${debate.intensity || 'moderado'}</span>
+      <span class="info-chip">${(debate.participants || []).length} agents</span>
+      <span class="info-chip">${formatDurationSec(stats?.duration || 0)}</span>
+    `;
+
+    // Inline phase dots
+    const phasesDiv = document.getElementById('inlinePhases');
+    const phaseNames = ['POSICIONES', 'CROSS-EXAM', 'REBUTTALS', 'VEREDICTO'];
+    const round = debate.currentRound || debate.round || 1;
+    const phaseIndex = Math.min(Math.floor((round - 1) / 2.5), phaseNames.length - 1);
+    phasesDiv.innerHTML = phaseNames.map((_, i) =>
+      `<div class="inline-phase-dot ${i < phaseIndex ? 'completed' : i === phaseIndex ? 'active' : ''}" title="${phaseNames[i]}"></div>`
+    ).join('');
+  }
+
+  // ── SESSION STATS ────────────────────────────────────────────────────
+  function renderSessionStats(debate, stats) {
+    const section = document.getElementById('sessionStatsSection');
+    section.style.display = 'block';
+
+    // Messages per round
+    const msgsPerRound = {};
+    (debate.messages || []).forEach(m => {
+      const r = m.round || 1;
+      msgsPerRound[r] = (msgsPerRound[r] || 0) + 1;
+    });
+    const roundChart = document.getElementById('msgsPerRoundChart');
+    const maxR = Math.max(...Object.values(msgsPerRound), 1);
+    roundChart.innerHTML = Object.entries(msgsPerRound).map(([r, count]) =>
+      `<div class="mini-bar-row">
+        <div class="mini-bar-label">R${r}</div>
+        <div class="mini-bar-track">
+          <div class="mini-bar-fill" style="width:${(count/maxR)*100}%;background:var(--accent-blue)">${count}</div>
+        </div>
+      </div>`
+    ).join('');
+
+    // Agent participation
+    const agentMsgs = {};
+    (debate.messages || []).forEach(m => {
+      agentMsgs[m.name] = (agentMsgs[m.name] || 0) + 1;
+    });
+    const totalMsgs = debate.messages.length || 1;
+    const partChart = document.getElementById('agentParticipationChart');
+    partChart.innerHTML = Object.entries(agentMsgs)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => {
+        const pct = ((count / totalMsgs) * 100).toFixed(0);
+        const color = getColor(name);
+        return `<div class="mini-bar-row">
+          <div class="mini-bar-label" title="${name}" style="width:auto;max-width:60px;overflow:hidden;text-overflow:ellipsis">${name.substring(0, 8)}</div>
+          <div class="mini-bar-track">
+            <div class="mini-bar-fill" style="width:${pct}%;background:${color}">${pct}%</div>
+          </div>
+        </div>`;
+      }).join('');
+
+    // Agent timeline
+    const timeline = document.getElementById('agentTimeline');
+    timeline.innerHTML = (debate.messages || []).map(m => {
+      const color = getColor(m.name);
+      return `<div class="timeline-dot" style="background:${color}" title="${m.name} - R${m.round}"></div>`;
+    }).join('');
+  }
+
+  // ── RENDER PHASE PROGRESS ────────────────────────────────────────────
+  function renderPhaseProgress(debate) {
+    const phases = ['POSICIONES', 'CROSS-EXAM', 'REBUTTALS', 'VEREDICTO'];
+    const round = debate.currentRound || debate.round || 1;
+    const phaseIndex = Math.min(Math.floor((round - 1) / 2.5), phases.length - 1);
+
+    const progressDiv = document.getElementById('phaseProgress');
+    progressDiv.innerHTML = '';
+
+    phases.forEach((phase, idx) => {
+      const dot = document.createElement('div');
+      dot.className = 'phase-dot';
+      if (idx < phaseIndex) dot.classList.add('completed');
+      else if (idx === phaseIndex) dot.classList.add('active');
+      progressDiv.appendChild(dot);
+    });
+
+    const phaseInfo = document.getElementById('phaseInfo');
+    const descriptions = {
+      'POSICIONES': 'Each participant presents their initial stance.',
+      'CROSS-EXAM': 'Direct questioning of arguments.',
+      'REBUTTALS': 'Responding to objections.',
+      'VEREDICTO': 'Final verdict and conclusions.'
+    };
+    const currentPhase = phases[phaseIndex];
+    phaseInfo.innerHTML = `
+      <div class="phase-info">
+        <div class="phase-name">${currentPhase}</div>
+        <div class="phase-desc">${descriptions[currentPhase]}</div>
+      </div>
+    `;
+  }
+
+  // ── RENDER INTENSITY ─────────────────────────────────────────────────
+  function renderIntensity(intensity) {
+    const badge = document.getElementById('intensityBadge');
+    const className = `intensity-${intensity || 'moderado'}`;
+    const label = intensity ? intensity.charAt(0).toUpperCase() + intensity.slice(1) : 'Moderado';
+    badge.className = `intensity-badge ${className}`;
+    badge.textContent = label;
+  }
+
+  // ── RENDER PARTICIPANTS ──────────────────────────────────────────────
+  function renderParticipants(debate) {
+    const list = document.getElementById('participantsList');
+    list.innerHTML = '';
+
+    if (!debate.participants || debate.participants.length === 0) {
+      list.innerHTML = '<div class="empty-state" style="height:auto"><div class="empty-text">No participants</div></div>';
+      return;
+    }
+
+    debate.participants.forEach(p => {
+      const color = getColor(p.name);
+      const card = document.createElement('div');
+      card.className = 'participant-card';
+      card.style.borderLeftColor = color;
+      const lastActive = p.lastActiveTime ? formatTime(p.lastActiveTime) : '-';
+      card.innerHTML = `
+        <div class="participant-header">
+          <div class="participant-avatar" style="background:${color}">${getInitials(p.name)}</div>
+          <div class="participant-name">${p.name}</div>
+          ${p.isVirtual ? '<div class="participant-virtual-badge">AI</div>' : ''}
+        </div>
+        <div class="participant-role">${p.role || 'participant'}</div>
+        <div class="participant-stats">
+          <div class="stat">
+            <div class="stat-label-small">Messages</div>
+            <div class="stat-value-small">${p.messageCount || 0}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label-small">Last Active</div>
+            <div class="stat-value-small">${lastActive}</div>
+          </div>
+        </div>
+      `;
+      list.appendChild(card);
+    });
+  }
+
+  // ── RENDER MESSAGES ──────────────────────────────────────────────────
+  function renderMessages(debate, startIndex) {
+    const container = document.getElementById('messagesContainer');
+    if (!debate.messages || debate.messages.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-text">No messages yet</div></div>';
+      return;
+    }
+    const newMessages = debate.messages.slice(startIndex);
+    newMessages.forEach((msg, idx) => {
+      const globalIdx = startIndex + idx;
+      const prevMsg = globalIdx > 0 ? debate.messages[globalIdx - 1] : null;
+      if (prevMsg && prevMsg.round !== msg.round) {
+        const marker = document.createElement('div');
+        marker.className = 'phase-change-marker';
+        marker.textContent = `Round ${msg.round}`;
+        container.appendChild(marker);
+      }
+      const color = getColor(msg.name);
+      const msgEl = document.createElement('div');
+      msgEl.className = 'message-item';
+      const wordCount = getWordCount(msg.text);
+      msgEl.innerHTML = `
+        <div class="message-avatar-small" style="background:${color}">${getInitials(msg.name)}</div>
+        <div class="message-bubble">
+          <div class="message-header-small">
+            <div class="message-name-small" style="color:${color}">${msg.name}</div>
+            <div class="message-time-small">${formatTime(msg.timestamp)}</div>
+          </div>
+          <div class="message-text-small">${escapeHtml(msg.text)}</div>
+          <div class="message-meta">
+            <span>R${msg.round}</span>
+            <span>${wordCount} words</span>
+          </div>
+        </div>
+      `;
+      container.appendChild(msgEl);
+    });
+    setTimeout(() => {
+      document.getElementById('centerPanel').scrollTop = document.getElementById('centerPanel').scrollHeight;
+    }, 0);
+  }
+
+  // ── RENDER MESSAGES CHART ────────────────────────────────────────────
+  function renderMessagesChart(debate) {
+    const chartDiv = document.getElementById('messagesChart');
+    chartDiv.innerHTML = '';
+    if (!debate.participants || debate.participants.length === 0) return;
+    const maxMessages = Math.max(...debate.participants.map(p => p.messageCount || 0), 1);
+    debate.participants.forEach(p => {
+      const count = p.messageCount || 0;
+      const percent = (count / maxMessages) * 100;
+      const color = getColor(p.name);
+      const item = document.createElement('div');
+      item.className = 'bar-item';
+      item.innerHTML = `
+        <div class="bar-label">${p.name.substring(0, 10)}</div>
+        <div class="bar-fill" style="background:linear-gradient(90deg, ${color}, ${color}80)">
+          <div class="bar-value" style="width:${percent}%">${count}</div>
+        </div>
+      `;
+      chartDiv.appendChild(item);
+    });
+  }
+
+  // ── RENDER KB ────────────────────────────────────────────────────────
+  function renderKnowledgeBase(debate) {
+    const kbSection = document.getElementById('kbSection');
+    const kbList = document.getElementById('kbList');
+    if (!debate.knowledgeBase || debate.knowledgeBase.length === 0) {
+      kbSection.style.display = 'none';
+      return;
+    }
+    kbSection.style.display = 'block';
+    kbList.innerHTML = '';
+    debate.knowledgeBase.forEach(kb => {
+      const item = document.createElement('div');
+      item.className = 'kb-item';
+      item.innerHTML = `
+        <div class="kb-source">${escapeHtml(kb.source)}</div>
+        <div class="kb-preview">${escapeHtml(kb.preview)}</div>
+      `;
+      item.addEventListener('click', () => {
+        const expanded = item.classList.toggle('kb-expanded');
+        item.innerHTML = `
+          <div class="kb-source">${escapeHtml(kb.source)}</div>
+          <div ${expanded ? 'style="font-size:11px;color:var(--text-primary);line-height:1.5"' : 'class="kb-preview"'}>${escapeHtml(kb.preview)}</div>
+        `;
+      });
+      kbList.appendChild(item);
+    });
+  }
+
+  // ── RENDER SITUACION ─────────────────────────────────────────────────
+  function renderSituacion(debate) {
+    const section = document.getElementById('situacionSection');
+    const chart = document.getElementById('workflowChart');
+    if (!debate.coordination || !debate.coordination.agents) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = 'block';
+    chart.innerHTML = '';
+    debate.coordination.agents.forEach(agent => {
+      const item = document.createElement('div');
+      item.className = 'workflow-item';
+      if (agent.blocked) item.classList.add('blocked');
+      item.innerHTML = `
+        <div class="workflow-status"></div>
+        <div class="workflow-name">${escapeHtml(agent.name)}</div>
+        <div style="font-size:10px;color:var(--text-secondary)">${agent.blocked ? 'BLOCKED' : 'READY'}</div>
+      `;
+      chart.appendChild(item);
+    });
+  }
+
+  // ── UPDATE PHASE DURATION ────────────────────────────────────────────
+  function updatePhaseDuration(debate) {
+    if (!phaseStartTime) phaseStartTime = Date.now();
+    document.getElementById('phaseDurationDisplay').textContent = formatDuration(Date.now() - phaseStartTime);
+  }
+
+  // ── POLL API ─────────────────────────────────────────────────────────
+  async function poll() {
+    try {
+      const res = await fetch(`${API_BASE}/api/debate/live`);
+      if (!res.ok) throw new Error('Server error');
+      const data = await res.json();
+
+      if (!data.debate && !currentDebate) {
+        setStatus('idle');
+        showNoDebate();
+        document.getElementById('lastUpdate').textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+        return;
+      }
+
+      const debate = data.debate;
+      if (!debate) return;
+
+      // Only auto-update if viewing the active debate (or no session selected)
+      if (selectedSessionId && selectedSessionId !== debate.id) {
+        document.getElementById('lastUpdate').textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+        return;
+      }
+
+      if (!currentDebate || currentDebate.id !== debate.id) {
+        currentDebate = debate;
+        selectedSessionId = debate.id;
+        lastMessageCount = 0;
+        phaseStartTime = null;
+        participantColorMap = {};
+        colorIndex = 0;
+        document.getElementById('messagesContainer').innerHTML = '';
+      }
+
+      setStatus(debate.status === 'active' ? 'live' : 'ended');
+      document.getElementById('headerStatus').textContent = debate.status === 'active' ? 'Live' : 'Ended';
+      document.getElementById('headerMessageCount').textContent = debate.messages ? debate.messages.length : 0;
+
+      // Update session bar
+      document.getElementById('sessionBarName').textContent = debate.topic || 'Live Debate';
+
+      document.getElementById('noDebateLeft').style.display = 'none';
+      document.getElementById('phaseMetricsPanel').style.display = 'block';
+      document.getElementById('noDebateCenter').style.display = 'none';
+      document.getElementById('messagesPanel').style.display = 'block';
+      document.getElementById('noDebateRight').style.display = 'none';
+      document.getElementById('participantsPanel').style.display = 'block';
+
+      renderPhaseProgress(debate);
+      renderIntensity(debate.intensity);
+      document.getElementById('roundNumber').textContent = `${debate.currentRound || debate.round}/${debate.maxRounds || debate.totalRounds}`;
+      updatePhaseDuration(debate);
+      renderParticipants(debate);
+      renderMessagesChart(debate);
+
+      if (debate.messages.length > lastMessageCount) {
+        renderMessages(debate, lastMessageCount);
+        lastMessageCount = debate.messages.length;
+      }
+
+      renderKnowledgeBase(debate);
+      renderSituacion(debate);
+      renderSessionStats(debate, null);
+
+      document.getElementById('lastUpdate').textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+    } catch (err) {
+      console.error('Poll error:', err);
+      setStatus('error');
+    }
+  }
+
+  function setStatus(status) {
+    const dot = document.getElementById('mainStatusDot');
+    const text = document.getElementById('mainStatusText');
+    if (status === 'live') {
+      dot.className = 'status-dot live';
+      text.textContent = 'Live';
+      text.style.color = 'var(--accent-green)';
+    } else if (status === 'ended') {
+      dot.className = 'status-dot ended';
+      text.textContent = 'Debate Ended';
+      text.style.color = 'var(--accent-red)';
+    } else if (status === 'error') {
+      dot.className = 'status-dot ended';
+      text.textContent = 'Connection Error';
+      text.style.color = 'var(--accent-red)';
+    } else {
+      dot.className = 'status-dot';
+      text.textContent = 'No Active Debate';
+      text.style.color = 'var(--text-secondary)';
+    }
+  }
+
+  function showNoDebate() {
+    document.getElementById('noDebateLeft').style.display = 'flex';
+    document.getElementById('phaseMetricsPanel').style.display = 'none';
+    document.getElementById('noDebateCenter').style.display = 'flex';
+    document.getElementById('messagesPanel').style.display = 'none';
+    document.getElementById('noDebateRight').style.display = 'flex';
+    document.getElementById('participantsPanel').style.display = 'none';
+    document.getElementById('sessionInfoBar').classList.remove('visible');
+    document.getElementById('sessionStatsSection').style.display = 'none';
+  }
+
+  // ── INITIALIZATION ───────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    showNoDebate();
+    setStatus('idle');
+    fetchSessions();
+    poll();
+    setInterval(poll, POLL_INTERVAL);
+    setInterval(fetchSessions, SESSION_POLL_INTERVAL);
+  });
+</script>
+
+</body>
+</html>

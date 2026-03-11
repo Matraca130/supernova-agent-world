@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent World - Multi-Agent Debate</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --bg-dark: #0f0f1a;
+    --border: #2a2a4a;
+    --text: #e0e0e0;
+    --text-dim: #888;
+    --blue: #7c83ff;
+    --green: #4ade80;
+    --yellow: #fdcb6e;
+    --red: #f87171;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg-dark);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    touch-action: none;
+  }
+  .nav-bar {
+    background: #08080d;
+    border-bottom: 1px solid var(--border);
+    padding: 6px 20px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .nav-link {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+  .nav-link:hover { color: var(--text); background: var(--bg); }
+  .nav-link.active { color: var(--blue); background: rgba(124,131,255,0.1); }
+  .top-bar {
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .top-bar h1 { font-size: 16px; color: var(--blue); font-weight: 600; }
+  .top-bar-info { display: flex; gap: 16px; font-size: 12px; color: var(--text-dim); }
+  .top-bar-info .val { color: var(--blue); font-weight: 600; }
+  .world-wrap {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+  canvas {
+    flex: 1;
+    display: block;
+    cursor: grab;
+  }
+  canvas:active { cursor: grabbing; }
+  .side-panel {
+    width: 280px;
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .panel-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .agent-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    border-left: 3px solid var(--blue);
+    transition: border-color 0.3s;
+  }
+  .agent-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .agent-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .agent-card-name { font-size: 12px; font-weight: 600; flex: 1; }
+  .agent-card-room { font-size: 10px; color: var(--text-dim); }
+  .agent-card-bubble {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.4;
+    max-height: 60px;
+    overflow: hidden;
+    margin-top: 6px;
+    font-style: italic;
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+  }
+  .status-bar {
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    padding: 6px 20px;
+    font-size: 11px;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+  }
+  @media (max-width: 900px) {
+    .side-panel { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="nav-bar">
+  <a href="/dashboard" class="nav-link">v1</a>
+  <a href="/dashboard-v2" class="nav-link">Dashboard</a>
+  <a href="/world" class="nav-link active">Agent World</a>
+</div>
+<div class="top-bar">
+  <h1>Agent World</h1>
+  <div class="top-bar-info">
+    <span>Topic: <span class="val" id="topicDisplay">-</span></span>
+    <span>Round: <span class="val" id="roundDisplay">-</span></span>
+    <span>Phase: <span class="val" id="phaseDisplay">-</span></span>
+    <span>Agents: <span class="val" id="agentCountDisplay">0</span></span>
+  </div>
+</div>
+
+<div class="world-wrap">
+  <canvas id="worldCanvas"></canvas>
+  <div class="side-panel">
+    <div class="panel-title">Agents</div>
+    <div id="agentCards"></div>
+    <div class="panel-title" style="margin-top:12px">Rooms</div>
+    <div class="legend" id="roomLegend"></div>
+  </div>
+</div>
+
+<div class="status-bar">
+  <span id="statusText">Connecting...</span>
+  <span id="lastUpdateText">-</span>
+</div>
+
+<script>
+// =====================================================================
+// POLYFILL: roundRect for older browsers
+// =====================================================================
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+    if (typeof r === 'number') r = [r, r, r, r];
+    else if (!Array.isArray(r)) r = [0, 0, 0, 0];
+    const [tl, tr, br, bl] = r;
+    this.moveTo(x + tl, y);
+    this.lineTo(x + w - tr, y);
+    this.quadraticCurveTo(x + w, y, x + w, y + tr);
+    this.lineTo(x + w, y + h - br);
+    this.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+    this.lineTo(x + bl, y + h);
+    this.quadraticCurveTo(x, y + h, x, y + h - bl);
+    this.lineTo(x, y + tl);
+    this.quadraticCurveTo(x, y, x + tl, y);
+    this.closePath();
+    return this;
+  };
+}
+
+// =====================================================================
+// CONFIG
+// =====================================================================
+const API_BASE = window.location.origin;
+const POLL_MS = 3000;
+const TILE = 48;
+const HALF = TILE / 2;
+const CHAR_SPEED = 1.8;
+
+// =====================================================================
+// ROOMS
+// =====================================================================
+const ROOMS = {
+  debate:   { label: 'Sala Debate',  icon: 'chat',   color: '#7c83ff', x: 6, y: 2,  w: 6, h: 5 },
+  reason:   { label: 'Razonamiento', icon: 'brain',  color: '#a78bfa', x: 0, y: 2,  w: 5, h: 5 },
+  github:   { label: 'GitHub',       icon: 'code',   color: '#4ade80', x: 13,y: 2,  w: 5, h: 5 },
+  stats:    { label: 'Analytics',    icon: 'chart',  color: '#fdcb6e', x: 0, y: 8,  w: 5, h: 4 },
+  lounge:   { label: 'Break Room',   icon: 'coffee', color: '#f87171', x: 6, y: 8,  w: 6, h: 4 },
+  kb:       { label: 'Knowledge',    icon: 'book',   color: '#38bdf8', x: 13,y: 8,  w: 5, h: 4 },
+};
+const ROOM_IDS = Object.keys(ROOMS);
+
+const HALLWAY_Y = 7.5;
+function getRoomCenter(roomId) {
+  const r = ROOMS[roomId];
+  if (!r) return { x: 9, y: 10 }; // fallback to lounge area
+  return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
+}
+
+// =====================================================================
+// ROLE COLORS + SKIN TONES
+// =====================================================================
+const ROLE_COLORS = {
+  'arquitecto-software': '#6c5ce7', 'critico-tecnico': '#e17055',
+  'ship-fast-founder': '#00b894',   'security-hardliner': '#d63031',
+  'junior-dev-mantenedor': '#74b9ff','medico-clinico': '#6c5ce7',
+  'investigador-radical': '#e17055', 'paciente-advocate': '#00b894',
+  'eticista': '#fdcb6e',            'cost-optimizer': '#d63031',
+  'defensor': '#74b9ff',            'devils-advocate': '#e17055',
+  'mediador-provocador': '#00b894',
+  'analista-datos': '#0984e3',      'estratega-largo-plazo': '#e84393',
+  'abogado-usuario-final': '#00cec9','optimizador-costos': '#636e72',
+  'innovador-disruptivo': '#fd79a8', 'integrador-sistemas': '#55efc4',
+  'historiador-lecciones': '#fab1a0','simplificador': '#81ecec',
+  'esceptico-metodico': '#dfe6e9',   'visionario-futuro': '#a29bfe',
+};
+const PALETTE = ['#6c5ce7','#0984e3','#00b894','#e17055','#e84393','#fdcb6e','#00cec9','#636e72','#fd79a8','#55efc4'];
+const SKIN_TONES = ['#f5d0a9','#e8b88a','#c68c53','#8d5524','#d4a574','#f0c8a0','#b07840','#deb887'];
+let paletteIdx = 0;
+let skinIdx = 0;
+
+function getAgentColor(name) {
+  return ROLE_COLORS[name] || PALETTE[paletteIdx++ % PALETTE.length];
+}
+
+function getAgentSkin() {
+  return SKIN_TONES[skinIdx++ % SKIN_TONES.length];
+}
+
+// =====================================================================
+// AGENT CLASS
+// =====================================================================
+class Agent {
+  constructor(name, color, roomId) {
+    this.name = name;
+    this.color = color;
+    this.skin = getAgentSkin();
+    this.room = roomId;
+    const c = getRoomCenter(roomId);
+    this.x = c.x + (Math.random() - 0.5) * 2;
+    this.y = c.y + (Math.random() - 0.5) * 1.5;
+    this.path = [];
+    this.facing = 1;
+    this.walkFrame = 0;
+    this.walkTimer = 0;
+    this.bubble = '';
+    this.bubbleTimer = 0;
+    this.bubbleLinesCache = null;
+    this.messageCount = 0;
+    this.isVirtual = true;
+    this.role = '';
+    this.idle = true;
+    // Idle animation state
+    this.idleTimer = Math.random() * 6;
+    this.blinkTimer = Math.random() * 4 + 2;
+    this.blinking = false;
+    this.blinkDuration = 0;
+    // Glow when speaking
+    this.glowAlpha = 0;
+    // Cached label width
+    this._labelCache = null;
+    this._labelText = '';
+  }
+
+  moveTo(roomId) {
+    if (!ROOMS[roomId]) roomId = 'lounge';
+    if (roomId === this.room && this.path.length === 0) return;
+    this.room = roomId;
+    const dest = getRoomCenter(roomId);
+    const destX = dest.x + (Math.random() - 0.5) * 1.5;
+    const destY = dest.y + (Math.random() - 0.5) * 1;
+    this.path = [
+      { x: this.x, y: HALLWAY_Y },
+      { x: destX, y: HALLWAY_Y },
+      { x: destX, y: destY }
+    ];
+    this.idle = false;
+  }
+
+  showBubble(text, duration = 5000) {
+    this.bubble = text.length > 80 ? text.substring(0, 77) + '...' : text;
+    this.bubbleTimer = duration;
+    this.bubbleLinesCache = null; // invalidate cache
+    this.glowAlpha = 1.0;
+  }
+
+  getLabelWidth(ctx2d) {
+    const label = this.name.length > 12 ? this.name.substring(0, 10) + '..' : this.name;
+    if (this._labelText !== label) {
+      this._labelText = label;
+      ctx2d.font = 'bold 9px system-ui';
+      this._labelCache = ctx2d.measureText(label).width;
+    }
+    return this._labelCache;
+  }
+
+  update(dt) {
+    // Walk along path
+    if (this.path.length > 0) {
+      const target = this.path[0];
+      const dx = target.x - this.x;
+      const dy = target.y - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 0.15) {
+        this.x = target.x;
+        this.y = target.y;
+        this.path.shift();
+        if (this.path.length === 0) this.idle = true;
+      } else {
+        const speed = CHAR_SPEED * dt;
+        this.x += (dx / dist) * speed;
+        this.y += (dy / dist) * speed;
+        if (Math.abs(dx) > 0.05) this.facing = dx > 0 ? 1 : -1;
+      }
+      this.walkTimer += dt;
+      if (this.walkTimer > 0.15) {
+        this.walkTimer = 0;
+        this.walkFrame = (this.walkFrame + 1) % 4;
+      }
+    } else {
+      // Smooth stop: decay walkFrame
+      if (this.walkFrame !== 0) {
+        this.walkTimer += dt;
+        if (this.walkTimer > 0.1) {
+          this.walkTimer = 0;
+          this.walkFrame = 0;
+        }
+      }
+    }
+
+    // Idle breathing animation
+    this.idleTimer += dt;
+
+    // Blink
+    this.blinkTimer -= dt;
+    if (this.blinkTimer <= 0 && !this.blinking) {
+      this.blinking = true;
+      this.blinkDuration = 0.12;
+    }
+    if (this.blinking) {
+      this.blinkDuration -= dt;
+      if (this.blinkDuration <= 0) {
+        this.blinking = false;
+        this.blinkTimer = 2 + Math.random() * 4;
+      }
+    }
+
+    // Bubble timer
+    if (this.bubbleTimer > 0) {
+      this.bubbleTimer -= dt * 1000;
+      if (this.bubbleTimer <= 0) { this.bubble = ''; this.bubbleTimer = 0; this.bubbleLinesCache = null; }
+    }
+
+    // Glow fade
+    if (this.glowAlpha > 0) {
+      this.glowAlpha = Math.max(0, this.glowAlpha - dt * 0.3);
+    }
+  }
+}
+
+// =====================================================================
+// RENDERER
+// =====================================================================
+const canvas = document.getElementById('worldCanvas');
+const ctx = canvas.getContext('2d');
+let camX = 0, camY = 0, zoom = 1;
+let dragging = false, dragStartX = 0, dragStartY = 0, dragCamX = 0, dragCamY = 0;
+
+function resize() {
+  canvas.width = canvas.clientWidth * devicePixelRatio;
+  canvas.height = canvas.clientHeight * devicePixelRatio;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── Pan: Mouse ──
+canvas.addEventListener('mousedown', e => {
+  dragging = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  dragCamX = camX;
+  dragCamY = camY;
+});
+canvas.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  camX = dragCamX + (e.clientX - dragStartX) / zoom;
+  camY = dragCamY + (e.clientY - dragStartY) / zoom;
+});
+canvas.addEventListener('mouseup', () => dragging = false);
+canvas.addEventListener('mouseleave', () => dragging = false);
+
+// ── Zoom: normalized for mouse vs trackpad ──
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const delta = e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY;
+  zoom = Math.max(0.4, Math.min(2.5, zoom * (1 - delta * 0.001)));
+}, { passive: false });
+
+// ── Touch: pan + pinch ──
+let lastTouches = [];
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  lastTouches = Array.from(e.touches).map(t => ({ x: t.clientX, y: t.clientY }));
+  if (e.touches.length === 1) {
+    dragging = true;
+    dragStartX = e.touches[0].clientX;
+    dragStartY = e.touches[0].clientY;
+    dragCamX = camX;
+    dragCamY = camY;
+  }
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const touches = Array.from(e.touches).map(t => ({ x: t.clientX, y: t.clientY }));
+  if (touches.length === 1 && dragging) {
+    camX = dragCamX + (touches[0].x - dragStartX) / zoom;
+    camY = dragCamY + (touches[0].y - dragStartY) / zoom;
+  } else if (touches.length === 2 && lastTouches.length === 2) {
+    const oldDist = Math.hypot(lastTouches[0].x - lastTouches[1].x, lastTouches[0].y - lastTouches[1].y);
+    const newDist = Math.hypot(touches[0].x - touches[1].x, touches[0].y - touches[1].y);
+    if (oldDist > 0) zoom = Math.max(0.4, Math.min(2.5, zoom * (newDist / oldDist)));
+  }
+  lastTouches = touches;
+}, { passive: false });
+canvas.addEventListener('touchend', e => {
+  dragging = false;
+  lastTouches = Array.from(e.touches).map(t => ({ x: t.clientX, y: t.clientY }));
+});
+
+// ── Isometric transform ──
+function toScreen(gx, gy) {
+  return { x: (gx - gy) * HALF, y: (gx + gy) * HALF * 0.5 };
+}
+
+// =====================================================================
+// DRAWING FUNCTIONS
+// =====================================================================
+
+function drawRoom(room) {
+  const corners = [
+    toScreen(room.x, room.y),
+    toScreen(room.x + room.w, room.y),
+    toScreen(room.x + room.w, room.y + room.h),
+    toScreen(room.x, room.y + room.h),
+  ];
+
+  // Floor
+  ctx.beginPath();
+  ctx.moveTo(corners[0].x, corners[0].y);
+  for (let i = 1; i < 4; i++) ctx.lineTo(corners[i].x, corners[i].y);
+  ctx.closePath();
+  ctx.fillStyle = room.color + '18';
+  ctx.fill();
+  ctx.strokeStyle = room.color + '55';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Grid lines
+  ctx.strokeStyle = room.color + '15';
+  ctx.lineWidth = 0.5;
+  for (let gx = room.x + 1; gx < room.x + room.w; gx++) {
+    const a = toScreen(gx, room.y);
+    const b = toScreen(gx, room.y + room.h);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  for (let gy = room.y + 1; gy < room.y + room.h; gy++) {
+    const a = toScreen(room.x, gy);
+    const b = toScreen(room.x + room.w, gy);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+
+  // Walls (isometric depth — back two walls)
+  const wallH = 12;
+  // Left wall
+  ctx.beginPath();
+  ctx.moveTo(corners[0].x, corners[0].y);
+  ctx.lineTo(corners[0].x, corners[0].y - wallH);
+  ctx.lineTo(corners[3].x, corners[3].y - wallH);
+  ctx.lineTo(corners[3].x, corners[3].y);
+  ctx.closePath();
+  ctx.fillStyle = room.color + '0c';
+  ctx.fill();
+  ctx.strokeStyle = room.color + '30';
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+
+  // Back wall
+  ctx.beginPath();
+  ctx.moveTo(corners[0].x, corners[0].y);
+  ctx.lineTo(corners[0].x, corners[0].y - wallH);
+  ctx.lineTo(corners[1].x, corners[1].y - wallH);
+  ctx.lineTo(corners[1].x, corners[1].y);
+  ctx.closePath();
+  ctx.fillStyle = room.color + '0a';
+  ctx.fill();
+  ctx.strokeStyle = room.color + '30';
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+
+  // Label
+  const center = toScreen(room.x + room.w / 2, room.y + room.h / 2);
+  ctx.font = 'bold 11px system-ui';
+  ctx.fillStyle = room.color + 'cc';
+  ctx.textAlign = 'center';
+  ctx.fillText(room.label, center.x, center.y - room.h * 6);
+
+  // Icon
+  const icons = { chat: '\u{1F4AC}', brain: '\u{1F9E0}', code: '\u{1F4BB}', chart: '\u{1F4CA}', coffee: '\u2615', book: '\u{1F4DA}' };
+  ctx.font = '14px system-ui';
+  ctx.fillText(icons[room.icon] || '', center.x, center.y - room.h * 6 - 16);
+}
+
+// ── Draw character ──
+function drawAgent(agent) {
+  const pos = toScreen(agent.x, agent.y);
+  const sx = pos.x;
+  const sy = pos.y;
+  const f = agent.facing;
+  const walking = agent.path.length > 0;
+  const frame = agent.walkFrame;
+
+  // Idle breathing
+  const breathe = agent.idle ? Math.sin(agent.idleTimer * 1.5) * 0.8 : 0;
+
+  ctx.save();
+  ctx.translate(sx, sy);
+
+  // Speaking glow
+  if (agent.glowAlpha > 0) {
+    ctx.beginPath();
+    ctx.arc(0, -10, 25, 0, Math.PI * 2);
+    ctx.fillStyle = agent.color + Math.floor(agent.glowAlpha * 40).toString(16).padStart(2, '0');
+    ctx.fill();
+  }
+
+  // Shadow
+  ctx.beginPath();
+  ctx.ellipse(0, 4, 10, 4, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fill();
+
+  const bodyBob = walking ? Math.sin(frame * Math.PI / 2) * 1.5 : breathe;
+  const legOffset = walking ? Math.sin(frame * Math.PI / 2) * 4 : 0;
+
+  // Legs
+  ctx.strokeStyle = agent.color;
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-3, -2 + bodyBob);
+  ctx.lineTo(-3 + legOffset * 0.3, 4);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(3, -2 + bodyBob);
+  ctx.lineTo(3 - legOffset * 0.3, 4);
+  ctx.stroke();
+
+  // Torso
+  ctx.fillStyle = agent.color;
+  ctx.beginPath();
+  ctx.roundRect(-7, -18 + bodyBob, 14, 17, 3);
+  ctx.fill();
+
+  // Shirt detail
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillRect(-4, -14 + bodyBob, 8, 8);
+
+  // Arms
+  const armSwing = walking ? Math.sin(frame * Math.PI / 2) * 15 : Math.sin(agent.idleTimer * 0.8) * 2;
+  ctx.strokeStyle = agent.color;
+  ctx.lineWidth = 3;
+  ctx.save();
+  ctx.translate(-7, -14 + bodyBob);
+  ctx.rotate((-20 + armSwing) * Math.PI / 180);
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 10); ctx.stroke();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(7, -14 + bodyBob);
+  ctx.rotate((20 - armSwing) * Math.PI / 180);
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 10); ctx.stroke();
+  ctx.restore();
+
+  // Head
+  ctx.fillStyle = agent.skin;
+  ctx.beginPath();
+  ctx.arc(0, -24 + bodyBob, 8, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Eyes (with blink)
+  if (!agent.blinking) {
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(f * 2.5, -25 + bodyBob, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(f * 6, -25 + bodyBob, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    // Closed eyes (lines)
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(f * 2.5 - 1.5, -25 + bodyBob);
+    ctx.lineTo(f * 2.5 + 1.5, -25 + bodyBob);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(f * 6 - 1.5, -25 + bodyBob);
+    ctx.lineTo(f * 6 + 1.5, -25 + bodyBob);
+    ctx.stroke();
+  }
+
+  // Hair
+  ctx.fillStyle = agent.color;
+  ctx.beginPath();
+  ctx.ellipse(0, -30 + bodyBob, 9, 5, 0, Math.PI, Math.PI * 2);
+  ctx.fill();
+
+  // Name tag (cached width)
+  const label = agent._labelText || agent.name.substring(0, 10);
+  const tw = agent.getLabelWidth(ctx);
+  ctx.beginPath();
+  ctx.roundRect(-tw / 2 - 4, -42 + bodyBob, tw + 8, 13, 3);
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fill();
+  ctx.font = 'bold 9px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = agent.color;
+  ctx.fillText(label, 0, -33 + bodyBob);
+
+  ctx.restore();
+
+  // Speech bubble
+  if (agent.bubble) {
+    drawBubble(agent, sx, sy - 50);
+  }
+}
+
+// ── Speech bubble (with cached line wrapping) ──
+function drawBubble(agent, x, y) {
+  const text = agent.bubble;
+  const color = agent.color;
+
+  // Cache line wrapping
+  if (!agent.bubbleLinesCache) {
+    ctx.font = '10px system-ui';
+    const maxW = 160;
+    const words = text.split(' ');
+    const lines = [];
+    let line = '';
+    for (const w of words) {
+      const test = line ? line + ' ' + w : w;
+      if (ctx.measureText(test).width > maxW) {
+        if (line) lines.push(line);
+        line = w;
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
+    if (lines.length > 3) {
+      lines.length = 3;
+      lines[2] = lines[2].substring(0, lines[2].length - 3) + '...';
+    }
+    agent.bubbleLinesCache = lines;
+  }
+
+  const lines = agent.bubbleLinesCache;
+  const lineH = 13;
+  const padX = 8, padY = 6;
+  const bw = 176; // maxW + padX*2
+  const bh = lines.length * lineH + padY * 2;
+  const bx = x - bw / 2;
+  const by = y - bh - 10;
+
+  // Fade effect near end
+  const alpha = agent.bubbleTimer < 1000 ? agent.bubbleTimer / 1000 : 1;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // Background
+  ctx.beginPath();
+  ctx.roundRect(bx, by, bw, bh, 6);
+  ctx.fillStyle = 'rgba(13,13,26,0.92)';
+  ctx.fill();
+  ctx.strokeStyle = color + '66';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Tail
+  ctx.beginPath();
+  ctx.moveTo(x - 5, by + bh);
+  ctx.lineTo(x, by + bh + 8);
+  ctx.lineTo(x + 5, by + bh);
+  ctx.fillStyle = 'rgba(13,13,26,0.92)';
+  ctx.fill();
+
+  // Text
+  ctx.font = '10px system-ui';
+  ctx.fillStyle = '#ddd';
+  ctx.textAlign = 'left';
+  lines.forEach((l, i) => {
+    ctx.fillText(l, bx + padX, by + padY + 10 + i * lineH);
+  });
+
+  ctx.restore();
+}
+
+// ── Hallway ──
+function drawHallway() {
+  const leftEdge = -1;
+  const rightEdge = 19;
+  const a = toScreen(leftEdge, HALLWAY_Y - 0.3);
+  const b = toScreen(rightEdge, HALLWAY_Y - 0.3);
+  const c = toScreen(rightEdge, HALLWAY_Y + 0.3);
+  const d = toScreen(leftEdge, HALLWAY_Y + 0.3);
+
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+  ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255,255,255,0.03)';
+  ctx.fill();
+
+  ctx.setLineDash([4, 8]);
+  const m1 = toScreen(leftEdge, HALLWAY_Y);
+  const m2 = toScreen(rightEdge, HALLWAY_Y);
+  ctx.beginPath();
+  ctx.moveTo(m1.x, m1.y); ctx.lineTo(m2.x, m2.y);
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// ── Furniture with isometric height ──
+function drawIsoBox(gx, gy, gw, gh, elevation, fill, stroke) {
+  const floor = [
+    toScreen(gx, gy), toScreen(gx + gw, gy),
+    toScreen(gx + gw, gy + gh), toScreen(gx, gy + gh),
+  ];
+  // Top face
+  const top = floor.map(c => ({ x: c.x, y: c.y - elevation }));
+  ctx.beginPath();
+  ctx.moveTo(top[0].x, top[0].y);
+  for (let i = 1; i < 4; i++) ctx.lineTo(top[i].x, top[i].y);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+
+  // Right face
+  ctx.beginPath();
+  ctx.moveTo(top[1].x, top[1].y);
+  ctx.lineTo(top[2].x, top[2].y);
+  ctx.lineTo(floor[2].x, floor[2].y);
+  ctx.lineTo(floor[1].x, floor[1].y);
+  ctx.closePath();
+  ctx.fillStyle = stroke; // darker
+  ctx.fill();
+
+  // Left face
+  ctx.beginPath();
+  ctx.moveTo(top[2].x, top[2].y);
+  ctx.lineTo(top[3].x, top[3].y);
+  ctx.lineTo(floor[3].x, floor[3].y);
+  ctx.lineTo(floor[2].x, floor[2].y);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+function drawFurniture() {
+  // Debate room: table
+  drawIsoBox(7.5, 3.5, 3, 2, 6, '#7c83ff20', '#7c83ff35');
+  // GitHub: monitors
+  for (let i = 0; i < 3; i++) {
+    drawIsoBox(14 + i * 1.3, 3.5, 0.8, 0.5, 8, '#4ade8018', '#4ade8030');
+    drawIsoBox(14 + i * 1.3, 4.2, 0.8, 0.8, 4, '#4ade8012', '#4ade8025'); // desks
+  }
+  // Reason: book stacks
+  drawIsoBox(1, 3, 1.5, 0.6, 5, '#a78bfa18', '#a78bfa30');
+  drawIsoBox(1, 4, 1.5, 0.6, 3, '#a78bfa15', '#a78bfa28');
+  // Lounge: couch
+  drawIsoBox(7.5, 9.5, 3, 1, 5, '#f8717118', '#f8717130');
+  // Stats: dashboard screen
+  drawIsoBox(1, 9, 2, 0.3, 10, '#fdcb6e20', '#fdcb6e35');
+  drawIsoBox(1, 9.5, 2, 1, 4, '#fdcb6e12', '#fdcb6e25'); // desk
+  // KB: shelves
+  drawIsoBox(14, 9, 3, 0.5, 8, '#38bdf818', '#38bdf830');
+  drawIsoBox(14, 10, 3, 0.5, 5, '#38bdf815', '#38bdf828');
+}
+
+// =====================================================================
+// STATE
+// =====================================================================
+let agents = {};
+let agentArr = []; // cached array, updated on change
+let lastDebateId = null;
+let lastMsgCount = 0;
+let debateData = null;
+let agentsDirty = false;
+
+// ── Room assignment logic (using roles, not string matching) ──
+function getAgentRoom(agentName, debate) {
+  if (!debate) return 'lounge';
+  const msgs = debate.messages || [];
+  const participants = debate.participants || [];
+  const spoken = debate.spokenThisRound || [];
+  const agent = participants.find(p => p.name === agentName);
+  const role = agent?.role || '';
+
+  // Last speaker -> debate room
+  if (msgs.length > 0 && msgs[msgs.length - 1].name === agentName) return 'debate';
+
+  // Second-to-last speaker -> reason (just finished, reflecting)
+  if (msgs.length > 1 && msgs[msgs.length - 2].name === agentName) return 'reason';
+
+  // Hasn't spoken yet this round -> waiting rooms based on role
+  if (!spoken.includes(agentName)) {
+    // Roles that research/analyze go to KB or stats
+    if (role.includes('analista') || role.includes('datos') || role.includes('optimizador')) return 'stats';
+    if (role.includes('investigador') || role.includes('historiador') || role.includes('esceptico')) return 'kb';
+    if (role.includes('arquitecto') || role.includes('integrador') || role.includes('dev')) return 'github';
+    // Others chill in lounge
+    return 'lounge';
+  }
+
+  // Spoke this round -> go to reasoning
+  if (spoken.includes(agentName)) return 'reason';
+
+  // VEREDICTO phase -> stats
+  if (debate.currentPhase === 'VEREDICTO') return 'stats';
+
+  return 'lounge';
+}
+
+// =====================================================================
+// POLL & UPDATE
+// =====================================================================
+async function pollWorld() {
+  try {
+    const res = await fetch(`${API_BASE}/api/debate/live`);
+    if (!res.ok) throw new Error('err');
+    const data = await res.json();
+
+    document.getElementById('statusText').textContent = data.debate ? 'Connected' : 'No active debate';
+    document.getElementById('lastUpdateText').textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+
+    if (!data.debate) {
+      debateData = null;
+      return;
+    }
+
+    const d = data.debate;
+    debateData = d;
+
+    document.getElementById('topicDisplay').textContent = (d.topic || '').substring(0, 50);
+    document.getElementById('roundDisplay').textContent = `${d.currentRound || d.round || '-'}/${d.maxRounds || d.totalRounds || '-'}`;
+    document.getElementById('phaseDisplay').textContent = d.currentPhase || '-';
+
+    const participants = d.participants || [];
+    document.getElementById('agentCountDisplay').textContent = participants.length;
+
+    let changed = false;
+    participants.forEach(p => {
+      if (!agents[p.name]) {
+        agents[p.name] = new Agent(p.name, getAgentColor(p.name), 'lounge');
+        agents[p.name].role = p.role || '';
+        agents[p.name].isVirtual = p.isVirtual !== false;
+        changed = true;
+      }
+      agents[p.name].messageCount = p.messageCount || 0;
+      agents[p.name].role = p.role || agents[p.name].role;
+
+      const targetRoom = getAgentRoom(p.name, d);
+      if (targetRoom !== agents[p.name].room) {
+        agents[p.name].moveTo(targetRoom);
+      }
+    });
+
+    if (changed) agentArr = Object.values(agents);
+
+    // New messages -> speech bubbles
+    const msgs = d.messages || [];
+    if (d.id !== lastDebateId) {
+      lastDebateId = d.id;
+      lastMsgCount = 0;
+    }
+    if (msgs.length > lastMsgCount) {
+      for (let i = lastMsgCount; i < msgs.length; i++) {
+        const m = msgs[i];
+        if (agents[m.name]) {
+          agents[m.name].showBubble(m.text, 6000);
+          agents[m.name].moveTo('debate');
+        }
+      }
+      lastMsgCount = msgs.length;
+    }
+
+    renderAgentCards();
+
+  } catch (e) {
+    document.getElementById('statusText').textContent = 'Connection error';
+  }
+}
+
+// ── Side panel: only update when data changes ──
+let lastCardHash = '';
+function renderAgentCards() {
+  const hash = agentArr.map(a => `${a.name}:${a.room}:${a.messageCount}:${a.bubble ? 1 : 0}`).join('|');
+  if (hash === lastCardHash) return;
+  lastCardHash = hash;
+
+  const container = document.getElementById('agentCards');
+  if (agentArr.length === 0) {
+    container.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px">No agents yet</div>';
+    return;
+  }
+  container.innerHTML = agentArr.map(a => {
+    const roomLabel = ROOMS[a.room]?.label || a.room;
+    return `<div class="agent-card" style="border-left-color:${a.color}">
+      <div class="agent-card-header">
+        <div class="agent-dot" style="background:${a.color}"></div>
+        <div class="agent-card-name">${a.name}</div>
+        <div class="agent-card-room">${roomLabel}</div>
+      </div>
+      <div style="font-size:10px;color:var(--text-dim)">${a.role} | ${a.messageCount} msgs</div>
+      ${a.bubble ? `<div class="agent-card-bubble">"${a.bubble}"</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function renderRoomLegend() {
+  document.getElementById('roomLegend').innerHTML = Object.values(ROOMS).map(r =>
+    `<div class="legend-item"><div class="legend-color" style="background:${r.color}"></div>${r.label}</div>`
+  ).join('');
+}
+
+// =====================================================================
+// GAME LOOP
+// =====================================================================
+let lastTime = 0;
+const roomValues = Object.values(ROOMS);
+
+function gameLoop(time) {
+  const dt = Math.min((time - lastTime) / 1000, 0.1);
+  lastTime = time;
+
+  // Update agents
+  for (let i = 0; i < agentArr.length; i++) agentArr[i].update(dt);
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const dpr = devicePixelRatio;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0f0f1a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Camera
+  ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, W / 2 + camX * zoom * dpr, H / 4 + camY * zoom * dpr);
+
+  // World
+  drawHallway();
+  for (let i = 0; i < roomValues.length; i++) drawRoom(roomValues[i]);
+  drawFurniture();
+
+  // Agents sorted by depth
+  const sorted = agentArr.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  for (let i = 0; i < sorted.length; i++) drawAgent(sorted[i]);
+
+  requestAnimationFrame(gameLoop);
+}
+
+// =====================================================================
+// INIT
+// =====================================================================
+renderRoomLegend();
+pollWorld();
+setInterval(pollWorld, POLL_MS);
+requestAnimationFrame(gameLoop);
+camY = -40;
+</script>
+</body>
+</html>
