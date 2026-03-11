@@ -1177,9 +1177,15 @@ function gameLoop(time) {
   for (let i = 0; i < roomValues.length; i++) drawRoom(roomValues[i]);
   drawFurniture();
 
+  // Pixel art mode
+  ctx.imageSmoothingEnabled = false;
+
   // Agents sorted by depth
   const sorted = agentArr.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x));
-  for (let i = 0; i < sorted.length; i++) drawAgent(sorted[i]);
+  for (let i = 0; i < sorted.length; i++) {
+    if (SPRITE_MODE === 'habbo') drawAgentHabbo(sorted[i]);
+    else drawAgent(sorted[i]);
+  }
 
   requestAnimationFrame(gameLoop);
 }
