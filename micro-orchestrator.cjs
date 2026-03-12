@@ -605,10 +605,17 @@ function feedbackToGenome(microResults, qualityScores, log) {
 
     decompositionFitness = Math.min(1.0, Math.max(0, decompositionFitness));
 
+    // Mutate genome with decomposition-specific signal
+    const mutated = genome.mutateGenome(currentGenome, {
+      decompositionQuality: decompositionFitness,
+      relevance: decompositionFitness * 0.8, // Decomposition relevance correlated
+    });
+    genome.saveGenome(mutated);
+
     // Append to genome history with decomposition metadata
     genome.appendHistory({
-      generation: currentGenome.generation,
-      genes: { ...currentGenome.genes },
+      generation: mutated.generation,
+      genes: { ...mutated.genes },
       fitness: decompositionFitness,
       signals: { decompositionQuality: decompositionFitness },
       debateId: microResults.treeId || 'unknown',
