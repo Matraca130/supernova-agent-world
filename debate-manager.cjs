@@ -38,10 +38,21 @@ function loadState() {
 let _saveTimer = null;
 let _savePending = false;
 
+let _qualityPaused = false;
+let _qualityCount = 0;
+const QUALITY_LIMIT_PER_SESSION = 100;
+
 function saveStateNow() {
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  try {
+    const data = JSON.stringify(state);
+    const tmpPath = STATE_FILE + '.tmp';
+    fs.writeFileSync(tmpPath, data, 'utf-8');
+    fs.renameSync(tmpPath, STATE_FILE);
+  } catch (err) {
+    console.error('[debate-manager] saveStateNow failed:', err.message);
+  }
   _savePending = false;
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
 }
 
 function saveState() {
@@ -49,10 +60,7 @@ function saveState() {
   if (!_saveTimer) {
     _saveTimer = setTimeout(() => {
       _saveTimer = null;
-      if (_savePending) {
-        _savePending = false;
-        fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
-      }
+      saveStateNow();
     }, 3000);
   }
 }
@@ -186,6 +194,18 @@ const INTENSITY_RULES = {
       'Respuestas mínimo 150 palabras con evidencia o razonamiento concreto.',
     ],
     minWords: 150,
+  },
+  micro: {
+    name: 'MICRO',
+    rules: [
+      'Este es un MICRO-DEBATE: rápido, focalizado, concreto.',
+      'Respuestas de 30-80 palabras máximo. NO divagues.',
+      'Cada mensaje DEBE terminar con: CONCLUSIÓN-PARCIAL: [tu conclusión] y CONFIANZA: [alta/media/baja]',
+      'NO repitas puntos ya dichos. AGREGA valor nuevo o REFUTA directamente.',
+      'Enfócate SOLO en el subtema asignado. No expandas al tema general.',
+      'Si estás de acuerdo con otro, di POR QUÉ con evidencia adicional en 1 oración.',
+    ],
+    minWords: 30,
   },
 };
 
@@ -456,9 +476,16 @@ function say(debateId, participantName, text, _skipSave = false) {
   if (!debate) return { error: `Debate ${debateId} no existe` };
   if (debate.status === 'finished') return { error: 'Debate ya terminó' };
 
-  // ── ENFORCE: Mínimo de palabras ──────────────────────────────────
+  // ── ENFORCE: Mínimo de palabras (dinámico por ronda) ─────────────
   const wordCount = text.trim().split(/\s+/).length;
-  const minWords = debate.minWords || 100;
+  const baseMinWords = debate.minWords || 100;
+  const maxRounds = debate.maxRounds || 10;
+  const round = debate.currentRound || 1;
+  // Reduce min words in later rounds: 100% in early, 66% mid, 33% closing
+  const roundRatio = round / maxRounds;
+  let minWords = baseMinWords;
+  if (roundRatio > 0.7) minWords = Math.max(30, Math.round(baseMinWords * 0.33));
+  else if (roundRatio > 0.4) minWords = Math.max(50, Math.round(baseMinWords * 0.66));
   if (wordCount < minWords) {
     return {
       error: `MENSAJE RECHAZADO: ${wordCount} palabras. Mínimo requerido: ${minWords}. Tu mensaje debe ser más detallado, incluir argumentos concretos, y objeciones directas a otros participantes. NO seas superficial.`,
@@ -495,6 +522,35 @@ function say(debateId, participantName, text, _skipSave = false) {
     phase: getCurrentPhase(debate.currentRound, debate.phases)?.name || null,
   };
   debate.messages.push(message);
+
+  // Observational quality scoring (controlled, never blocks)
+  _qualityCount++;
+  if (_qualityCount > QUALITY_LIMIT_PER_SESSION) _qualityPaused = true;
+
+  if (!_qualityPaused) {
+    Promise.resolve().then(async () => {
+      try {
+        const qualityGate = require('./quality-gate.cjs');
+        const otherNames = debate.participants
+          .filter(p => p.name !== participantName)
+          .map(p => p.name);
+        const score = await qualityGate.scoreResponse(
+          text, debate.topic || '', participantName,
+          debate.currentRound, 0, otherNames
+        );
+        message.qualityScore = score.composite;
+        message.qualityDetail = {
+          relevance: score.relevance,
+          novelty: score.novelty,
+          concreteness: score.concreteness,
+          argumentQuality: score.argumentQuality,
+        };
+        message._embedded = true; // Flag: already embedded via quality gate
+      } catch (err) {
+        // Quality scoring is optional — never block say()
+      }
+    });
+  }
 
   // Incrementar exchange count
   debate.exchangeCount[participantName] = myExchanges + 1;
@@ -702,19 +758,145 @@ function voteFinish(debateId, agentName, reason = '') {
   const current = debate.finishVotes.length;
   const ready = current >= needed;
 
+  // AUTO-DONE: if consensus reached, close debate automatically
+  if (ready) {
+    const synthesis = `Debate cerrado por auto-done. ${current}/${totalParticipants} agentes votaron para finalizar.\n\nVotos:\n${debate.finishVotes.map(v => `- ${v.name} (${v.role}): ${v.reason || 'sin razón'}`).join('\n')}`;
+    finishDebate(debateId, synthesis, true); // skip consensus check (already have it)
+    console.error(`[AUTO-DONE] Debate ${debateId} cerrado automáticamente. ${current}/${totalParticipants} votos.`);
+
+    return {
+      vote_registered: true,
+      auto_done: true,
+      agent: agentName,
+      votes: current,
+      needed,
+      total_participants: totalParticipants,
+      voters: debate.finishVotes.map(v => `${v.name} (${v.role})`),
+      message: `AUTO-DONE: Consenso alcanzado (${current}/${totalParticipants}). Debate cerrado automáticamente.`,
+    };
+  }
+
   return {
     vote_registered: true,
     agent: agentName,
     votes: current,
     needed,
     total_participants: totalParticipants,
-    ready_to_finish: ready,
+    ready_to_finish: false,
     voters: debate.finishVotes.map(v => `${v.name} (${v.role})`),
     missing: needed - current,
-    message: ready
-      ? `CONSENSO ALCANZADO (${current}/${totalParticipants}). El coordinador-merge puede llamar "finalizar" ahora.`
-      : `Voto registrado. Faltan ${needed - current} voto(s) más para consenso (${current}/${needed} necesarios).`,
+    message: `Voto registrado. Faltan ${needed - current} voto(s) más para auto-done (${current}/${needed} necesarios).`,
   };
+}
+
+/**
+ * Genera síntesis automática a partir de los datos del debate.
+ * No usa IA — extrae estructura de checkpoints, mensajes y proposals.
+ */
+function buildAutoSynthesis(debate) {
+  const { parseCheckpoint } = require('./prompt-builder.cjs');
+  const lines = [];
+  lines.push(`# Síntesis: ${debate.topic}`);
+  lines.push(`**${debate.messages.length} mensajes** en **${debate.currentRound} rondas** | ${debate.participants.length} agentes\n`);
+
+  // Participantes
+  lines.push('## Participantes');
+  for (const p of debate.participants) {
+    const msgCount = debate.messages.filter(m => m.participantName === p.name).length;
+    lines.push(`- **${p.name}** (${p.role}) — ${msgCount} mensajes`);
+  }
+
+  // Extraer checkpoints de todos los mensajes
+  const allCheckpoints = debate.messages
+    .map(m => parseCheckpoint(m.text, m.participantName, m.round))
+    .filter(cp => cp.structured);
+
+  // Consensos (mencionados por 2+ agentes)
+  const consensoCount = {};
+  for (const cp of allCheckpoints) {
+    for (const c of (cp.consenso || [])) {
+      const key = c.toLowerCase().slice(0, 80);
+      if (!consensoCount[key]) consensoCount[key] = { text: c, agents: new Set() };
+      consensoCount[key].agents.add(cp.agentName);
+    }
+  }
+  const sharedConsenso = Object.values(consensoCount).filter(c => c.agents.size >= 2);
+  if (sharedConsenso.length > 0) {
+    lines.push('\n## Consensos (acordados por 2+ agentes)');
+    for (const c of sharedConsenso.slice(0, 10)) {
+      lines.push(`- ${c.text} *(${[...c.agents].join(', ')})*`);
+    }
+  }
+
+  // Divergencias
+  const divergencias = [];
+  for (const cp of allCheckpoints) {
+    for (const d of (cp.divergencias || [])) {
+      divergencias.push({ text: d, agent: cp.agentName });
+    }
+  }
+  if (divergencias.length > 0) {
+    lines.push('\n## Divergencias');
+    for (const d of divergencias.slice(0, 10)) {
+      lines.push(`- ${d.agent}: ${d.text}`);
+    }
+  }
+
+  // Acciones concretas
+  const acciones = {};
+  for (const cp of allCheckpoints) {
+    for (const a of (cp.accionable || [])) {
+      const key = a.toLowerCase().slice(0, 80);
+      if (!acciones[key]) acciones[key] = { text: a, agents: new Set() };
+      acciones[key].agents.add(cp.agentName);
+    }
+  }
+  const sortedAcciones = Object.values(acciones).sort((a, b) => b.agents.size - a.agents.size);
+  if (sortedAcciones.length > 0) {
+    lines.push('\n## Acciones');
+    for (const a of sortedAcciones.slice(0, 15)) {
+      const priority = a.agents.size >= 3 ? 'P0' : a.agents.size >= 2 ? 'P1' : 'P2';
+      lines.push(`- [${priority}] ${a.text} *(${[...a.agents].join(', ')})*`);
+    }
+  }
+
+  // Preguntas abiertas
+  const preguntas = [];
+  for (const cp of allCheckpoints) {
+    for (const q of (cp.preguntas || [])) {
+      preguntas.push({ text: q, agent: cp.agentName });
+    }
+  }
+  if (preguntas.length > 0) {
+    lines.push('\n## Preguntas abiertas');
+    for (const q of [...new Map(preguntas.map(p => [p.text.slice(0, 50), p])).values()].slice(0, 8)) {
+      lines.push(`- ${q.agent}: ${q.text}`);
+    }
+  }
+
+  // Proposals de código
+  const debateProposals = proposals.filter(p => p.debateId === debate.id || p.debateId === debate.topic);
+  if (debateProposals.length > 0) {
+    lines.push('\n## Propuestas de código');
+    for (const p of debateProposals) {
+      lines.push(`- [${p.status.toUpperCase()}] ${p.id}: ${p.filePath} — ${p.reason.slice(0, 80)}`);
+    }
+  }
+
+  // Genome state
+  try {
+    const { getGenomeStats } = require('./strategy-genome.cjs');
+    const stats = getGenomeStats();
+    if (stats.generation > 0) {
+      lines.push(`\n## Genoma (gen ${stats.generation})`);
+      for (const [gene, val] of Object.entries(stats.genes)) {
+        const bar = val > 0.66 ? '▓▓▓' : val > 0.33 ? '▓▓░' : '▓░░';
+        lines.push(`- ${gene}: ${bar} ${val.toFixed(2)}`);
+      }
+    }
+  } catch (_) {}
+
+  return lines.join('\n');
 }
 
 /**
@@ -741,33 +923,44 @@ function finishDebate(debateId, synthesis = null, _skipConsensus = false) {
   }
 
   debate.status = 'finished';
-  if (synthesis) debate.synthesis = synthesis;
+  // Auto-generate synthesis if not provided
+  if (!synthesis) {
+    synthesis = buildAutoSynthesis(debate);
+  }
+  debate.synthesis = synthesis;
   saveStateNow(); // Crítico: cierre de debate debe persistir inmediatamente
 
   // Auto-embed toda la sesión al finalizar (fire & forget)
   (async () => {
     try {
-      // Embed cada mensaje
-      for (const msg of debate.messages) {
-        await embeddings.embed(msg.text, {
-          debateId,
-          type: 'message',
-          agentName: msg.participantName,
-          role: msg.participantRole,
-          round: msg.round,
-          phase: msg.phase,
-        });
+      // Skip messages already embedded by quality gate
+      const unembedded = debate.messages.filter(msg => !msg._embedded);
+
+      // Batch embed messages (20 at a time for rate limit safety)
+      const EMBED_BATCH = 20;
+      for (let i = 0; i < unembedded.length; i += EMBED_BATCH) {
+        const batch = unembedded.slice(i, i + EMBED_BATCH);
+        await Promise.all(batch.map(msg =>
+          embeddings.embed(msg.text, {
+            debateId,
+            type: 'message',
+            agentName: msg.participantName,
+            role: msg.participantRole,
+            round: msg.round,
+            phase: msg.phase,
+          }).catch(err => console.error(`[embeddings] msg embed failed:`, err.message))
+        ));
       }
       // Embed knowledge base entries
-      if (debate.knowledgeBase) {
-        for (const kb of debate.knowledgeBase) {
-          await embeddings.embed(kb.content, {
+      if (debate.knowledgeBase && debate.knowledgeBase.length > 0) {
+        await Promise.all(debate.knowledgeBase.map(kb =>
+          embeddings.embed(kb.content, {
             debateId,
             type: 'context',
             agentName: kb.source,
             role: kb.category,
-          });
-        }
+          }).catch(err => console.error(`[embeddings] kb embed failed:`, err.message))
+        ));
       }
       // Embed synthesis
       if (synthesis) {
@@ -778,9 +971,95 @@ function finishDebate(debateId, synthesis = null, _skipConsensus = false) {
           role: 'synthesis',
         });
       }
-      console.error(`[embeddings] Sesión ${debateId} embeddeada: ${debate.messages.length} msgs + ${(debate.knowledgeBase || []).length} KB + ${synthesis ? 1 : 0} synthesis`);
+      console.error(`[embeddings] Sesión ${debateId} embeddeada: ${unembedded.length}/${debate.messages.length} msgs + ${(debate.knowledgeBase || []).length} KB + ${synthesis ? 1 : 0} synthesis`);
     } catch (err) {
       console.error(`[embeddings] Error embeddeando sesión ${debateId}:`, err.message);
+    }
+  })();
+
+  // Self-improvement: record outcome + extract principles (fire & forget)
+  (async () => {
+    try {
+      const outcomes = require('./debate-outcomes.cjs');
+      const agents = debate.participants.map(p => ({ name: p.name, role: p.role }));
+
+      // Collect quality scores from messages
+      const qualityScores = debate.messages
+        .filter(m => m.qualityScore !== undefined)
+        .map(m => ({
+          agentName: m.participantName,
+          round: m.round,
+          composite: m.qualityScore,
+          ...(m.qualityDetail || {}),
+        }));
+
+      outcomes.recordOutcome({
+        debateId,
+        topic: debate.topic || '',
+        messages: debate.messages,
+        rounds: debate.currentRound,
+        maxRounds: debate.maxRounds || 10,
+        duration: Date.now() - new Date(debate.createdAt).getTime(),
+        agents,
+        synthesis: synthesis || '',
+        principlesUsed: [], // MCP debates don't inject principles yet
+        qualityScores,
+        repetitionDetected: false,
+      });
+    } catch (err) {
+      console.error(`[self-improvement] outcome recording failed for ${debateId}:`, err.message);
+    }
+
+    // Extract principles from synthesis
+    if (synthesis) {
+      try {
+        const principles = require('./principles.cjs');
+        principles.extractPrinciples(synthesis, debateId);
+      } catch (err) {
+        console.error(`[self-improvement] principle extraction failed for ${debateId}:`, err.message);
+      }
+    }
+
+    // Run maintenance if enough data
+    try {
+      const principlesModule = require('./principles.cjs');
+      const outcomesModule = require('./debate-outcomes.cjs');
+      const correlationData = outcomesModule.getCorrelationData();
+      if (correlationData.length >= 2) {
+        principlesModule.runMaintenance(correlationData);
+      }
+    } catch (err) {
+      // Maintenance is optional
+    }
+
+    // ── Genome mutation: evolve after every debate ──
+    try {
+      const { loadGenome, mutateGenome, saveGenome, appendHistory, rollbackGenome } = require('./strategy-genome.cjs');
+      if (qualityScores.length > 0) {
+        // Average quality signals across all messages
+        const signals = { concreteness: 0, argumentQuality: 0, relevance: 0, novelty: 0 };
+        let count = 0;
+        for (const qs of qualityScores) {
+          if (qs.concreteness !== undefined) signals.concreteness += qs.concreteness;
+          if (qs.argumentQuality !== undefined) signals.argumentQuality += qs.argumentQuality;
+          if (qs.relevance !== undefined) signals.relevance += qs.relevance;
+          if (qs.novelty !== undefined) signals.novelty += qs.novelty;
+          count++;
+        }
+        if (count > 0) {
+          for (const k of Object.keys(signals)) signals[k] /= count;
+          const genome = loadGenome();
+          let mutated = mutateGenome(genome, signals);
+          const rollback = rollbackGenome(mutated);
+          if (rollback) mutated = rollback;
+          saveGenome(mutated);
+          const overallFitness = Object.values(signals).reduce((a, b) => a + b, 0) / Object.values(signals).length;
+          appendHistory({ debateId, fitness: overallFitness, generation: mutated.generation, genes: { ...mutated.genes } });
+          console.error(`[genome] Mutated after ${debateId}: gen ${mutated.generation}, fitness ${overallFitness.toFixed(3)}`);
+        }
+      }
+    } catch (err) {
+      console.error(`[genome] Mutation failed after ${debateId}: ${err.message}`);
     }
   })();
 
@@ -1624,7 +1903,7 @@ function getGovernanceStatus(proposalId) {
 
 // ── Code Proposal Functions (with Governance) ───────────────────────
 
-function readProjectFile(filePath) {
+function readProjectFile(filePath, offset, limit) {
   const resolved = path.resolve(__dirname, filePath);
   if (!resolved.startsWith(__dirname)) {
     return { error: 'Access denied: can only read files within the project directory.' };
@@ -1632,15 +1911,77 @@ function readProjectFile(filePath) {
   try {
     if (!fs.existsSync(resolved)) return { error: `File not found: ${filePath}` };
     const content = fs.readFileSync(resolved, 'utf-8');
-    const lines = content.split('\n');
+    const allLines = content.split('\n');
+    const totalLines = allLines.length;
+
+    // Pagination: offset (1-based line number), limit (how many lines)
+    const start = Math.max(0, (offset || 1) - 1);
+    const count = limit || totalLines;
+    const lines = allLines.slice(start, start + count);
+    const showing = { from: start + 1, to: start + lines.length, total: totalLines };
+
     return {
       path: filePath,
-      lines: lines.length,
-      content: lines.map((l, i) => `${i + 1}: ${l}`).join('\n'),
+      lines: totalLines,
+      showing,
+      truncated: count < totalLines,
+      content: lines.map((l, i) => `${start + i + 1}: ${l}`).join('\n'),
     };
   } catch (e) {
     return { error: `Failed to read file: ${e.message}` };
   }
+}
+
+function grepProject(pattern, fileFilter, contextLines) {
+  const base = __dirname;
+  const ignore = ['node_modules', '.git', 'sesiones-guardadas', 'sessions', 'memoria', 'embeddings.json', 'debates.json'];
+  const ctx = contextLines || 0;
+  const results = [];
+  let regex;
+  try {
+    regex = new RegExp(pattern, 'gi');
+  } catch (_) {
+    regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+  }
+
+  function walk(dir, rel) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const entry of entries) {
+      if (ignore.includes(entry.name)) continue;
+      const fullPath = path.join(dir, entry.name);
+      const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(fullPath, relPath);
+      } else {
+        if (fileFilter && !relPath.includes(fileFilter) && !entry.name.endsWith(fileFilter)) continue;
+        // Skip binary/large files
+        try {
+          const stat = fs.statSync(fullPath);
+          if (stat.size > 500000) continue; // skip >500KB
+        } catch (_) { continue; }
+        try {
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          const lines = content.split('\n');
+          for (let i = 0; i < lines.length; i++) {
+            if (regex.test(lines[i])) {
+              regex.lastIndex = 0;
+              const from = Math.max(0, i - ctx);
+              const to = Math.min(lines.length - 1, i + ctx);
+              const snippet = [];
+              for (let j = from; j <= to; j++) {
+                snippet.push(`${j + 1}${j === i ? '>' : ':'} ${lines[j]}`);
+              }
+              results.push({ file: relPath, line: i + 1, snippet: snippet.join('\n') });
+              if (results.length >= 50) return; // cap results
+            }
+          }
+        } catch (_) {}
+      }
+    }
+  }
+  walk(base, '');
+  return { pattern, matches: results.length, results };
 }
 
 function listProjectFiles(pattern) {
@@ -1800,7 +2141,7 @@ function reviewProposal(proposalId, reviewerName, approve, comment) {
   };
 }
 
-function applyProposal(proposalId, applierName) {
+async function applyProposal(proposalId, applierName) {
   const prop = proposals.find(p => p.id === proposalId);
   if (!prop) return { error: 'Proposal not found' };
   if (prop.status !== 'approved') return { error: `Proposal must be approved first (current: ${prop.status})` };
@@ -1821,64 +2162,42 @@ function applyProposal(proposalId, applierName) {
 
   const resolved = path.resolve(__dirname, prop.filePath);
 
-  // Create git branch for the change
-  let branch = null;
+  // Apply using async fs to avoid blocking the event loop
   try {
-    const { execSync } = require('child_process');
-    branch = `proposal/${prop.id}`;
-    execSync(`git checkout -b ${branch}`, { cwd: __dirname, encoding: 'utf-8', stdio: 'pipe' });
-    prop.branch = branch;
-  } catch (e) {
-    // Git not available or not a repo — apply directly but log warning
-    prop.branch = null;
-  }
-
-  try {
-    const content = fs.readFileSync(resolved, 'utf-8');
-    if (!content.includes(prop.oldString)) {
+    const fsPromises = require('fs').promises;
+    const rawContent = await fsPromises.readFile(resolved, 'utf-8');
+    // Normalize CRLF → LF for matching (files on Windows may have \r\n)
+    const content = rawContent.replace(/\r\n/g, '\n');
+    const oldStringNorm = prop.oldString.replace(/\r\n/g, '\n');
+    const newStringNorm = prop.newString.replace(/\r\n/g, '\n');
+    if (!content.includes(oldStringNorm)) {
       prop.status = 'rejected';
-      // Return to previous branch if we created one
-      if (branch) {
-        try {
-          const { execSync } = require('child_process');
-          execSync('git checkout -', { cwd: __dirname, stdio: 'pipe' });
-          execSync(`git branch -D ${branch}`, { cwd: __dirname, stdio: 'pipe' });
-        } catch (_) {}
-      }
-      return { error: 'old_string no longer found in file — file may have changed. Proposal rejected.' };
+      return { error: 'old_string no longer found in file — file may have changed or CRLF mismatch. Proposal rejected.' };
     }
-    const newContent = content.replace(prop.oldString, prop.newString);
-    fs.writeFileSync(resolved, newContent, 'utf-8');
+    const newContent = content.replace(oldStringNorm, newStringNorm);
+    await fsPromises.writeFile(resolved, newContent, 'utf-8');
     prop.status = 'applied';
     prop.appliedAt = new Date().toISOString();
     prop.appliedBy = applierName || 'unknown';
+    prop.branch = null;
+
+    console.error(`[PROPOSAL APPLIED] ${prop.id} | ${prop.filePath} | by ${applierName} | reason: ${prop.reason.slice(0, 80)}`);
 
     prop.governanceLog.push({
       action: 'applied',
       by: applierName || 'unknown',
       role: applierName ? _getAgentRole(prop.debateId, applierName) : null,
-      branch: branch,
       at: new Date().toISOString(),
     });
-
-    // Commit on branch if git available
-    if (branch) {
-      try {
-        const { execSync } = require('child_process');
-        execSync(`git add "${prop.filePath}"`, { cwd: __dirname, stdio: 'pipe' });
-        execSync(`git commit -m "proposal(${prop.id}): ${prop.reason.substring(0, 60)}"`, { cwd: __dirname, stdio: 'pipe' });
-      } catch (_) {}
-    }
 
     return {
       id: prop.id,
       status: 'applied',
       file: prop.filePath,
-      branch: branch,
       appliedBy: applierName,
-      message: branch
-        ? `Change applied on branch "${branch}". Run tests before merging.`
-        : 'Change applied directly (git not available). Run tests to verify.',
+      debateId: prop.debateId,
+      reason: prop.reason,
+      message: 'Change applied successfully. Run tests to verify.',
     };
   } catch (e) {
     return { error: `Failed to apply: ${e.message}` };
@@ -1957,6 +2276,96 @@ function runProjectTests() {
     return { allPassed, passed: parseInt(passed), failed: parseInt(failed), output: output.slice(-500) };
   } catch (e) {
     return { allPassed: false, error: e.message, output: (e.stdout || '').slice(-500) };
+  }
+}
+
+// ── Direct Edit/Write: bypass governance, apply immediately ──────────────────
+
+const DIRECT_FORBIDDEN_FILES = ['test-suite.cjs', '.env', 'package-lock.json', 'node_modules'];
+
+function _validateFilePath(filePath) {
+  const resolved = path.resolve(__dirname, filePath);
+  if (!resolved.startsWith(__dirname)) return { error: 'Access denied: outside project directory.' };
+  if (DIRECT_FORBIDDEN_FILES.some(f => filePath.includes(f))) return { error: `Forbidden: "${filePath}" cannot be modified by agents.` };
+  return { resolved };
+}
+
+async function directEdit(filePath, oldString, newString, reason, agentName) {
+  if (!oldString || !newString) return { error: 'old_string and new_string are required.' };
+  if (oldString === newString) return { error: 'old_string and new_string must be different.' };
+  const v = _validateFilePath(filePath);
+  if (v.error) return v;
+  try {
+    const fsPromises = require('fs').promises;
+    const rawContent = await fsPromises.readFile(v.resolved, 'utf-8');
+    const content = rawContent.replace(/\r\n/g, '\n');
+    const oldNorm = oldString.replace(/\r\n/g, '\n');
+    const newNorm = newString.replace(/\r\n/g, '\n');
+    if (!content.includes(oldNorm)) return { error: 'old_string not found in file. Read the file first to get exact content.' };
+    const occurrences = content.split(oldNorm).length - 1;
+    if (occurrences > 1) return { error: `old_string found ${occurrences} times — must be unique. Add more context.` };
+    const newContent = content.replace(oldNorm, newNorm);
+    await fsPromises.writeFile(v.resolved, newContent, 'utf-8');
+    return { success: true, file: filePath, agent: agentName, reason, linesChanged: newNorm.split('\n').length };
+  } catch (e) {
+    return { error: `Edit failed: ${e.message}` };
+  }
+}
+
+async function directWrite(filePath, content, reason, agentName) {
+  if (!content) return { error: 'content is required.' };
+  const v = _validateFilePath(filePath);
+  if (v.error) return v;
+  try {
+    const fsPromises = require('fs').promises;
+    // Ensure parent directory exists
+    const dir = path.dirname(v.resolved);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const existed = fs.existsSync(v.resolved);
+    await fsPromises.writeFile(v.resolved, content, 'utf-8');
+    return { success: true, file: filePath, agent: agentName, reason, created: !existed, lines: content.split('\n').length };
+  } catch (e) {
+    return { error: `Write failed: ${e.message}` };
+  }
+}
+
+// ── Git Auto-Sync: commit + push after successful apply ──────────────────────
+
+function gitSync(proposal) {
+  const { execSync } = require('child_process');
+  const opts = { cwd: __dirname, timeout: 30000, encoding: 'utf-8', stdio: 'pipe' };
+  try {
+    // Stage the changed file
+    const resolved = path.resolve(__dirname, proposal.filePath);
+    execSync(`git add "${resolved}"`, opts);
+
+    // Commit with proposal metadata
+    const msg = `proposal(${proposal.id}): ${proposal.reason.slice(0, 70)}\n\nFile: ${proposal.filePath}\nDebate: ${proposal.debateId}\nApplied-by: ${proposal.appliedBy || 'unknown'}`;
+    execSync(`git commit -m "${msg.replace(/"/g, '\\"')}"`, opts);
+
+    // Push to current branch
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', opts).trim();
+    execSync(`git push origin ${branch}`, opts);
+
+    const hash = execSync('git rev-parse --short HEAD', opts).trim();
+    console.error(`[GIT-SYNC] Committed + pushed ${proposal.id} → ${branch} (${hash})`);
+    return { synced: true, branch, commit: hash };
+  } catch (e) {
+    console.error(`[GIT-SYNC] Failed for ${proposal.id}: ${e.message}`);
+    return { synced: false, error: e.message };
+  }
+}
+
+function gitPull() {
+  const { execSync } = require('child_process');
+  const opts = { cwd: __dirname, timeout: 30000, encoding: 'utf-8', stdio: 'pipe' };
+  try {
+    const output = execSync('git pull --rebase', opts);
+    console.error(`[GIT-PULL] ${output.trim()}`);
+    return { success: true, output: output.trim() };
+  } catch (e) {
+    console.error(`[GIT-PULL] Failed: ${e.message}`);
+    return { success: false, error: e.message };
   }
 }
 
@@ -2196,6 +2605,7 @@ module.exports = {
   saveStateNow,
   // Code proposals + governance
   readProjectFile,
+  grepProject,
   listProjectFiles,
   proposeEdit,
   reviewProposal,
@@ -2204,6 +2614,10 @@ module.exports = {
   listProposals,
   getProposal,
   runProjectTests,
+  directEdit,
+  directWrite,
+  gitSync,
+  gitPull,
   getGovernanceConfig,
   getGovernanceStatus,
   // Embeddings
