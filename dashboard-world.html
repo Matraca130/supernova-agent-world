@@ -199,9 +199,12 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
 }
 
 // =====================================================================
-// HABBO PIXEL ART SYSTEM
+// CREATURE PIXEL ART SYSTEM (Zombie + Dragon, genome-linked mutations)
 // =====================================================================
-const SPRITE_MODE = 'habbo'; // 'habbo' | 'classic'
+const SPRITE_MODE = 'habbo'; // 'habbo' = creature mode (zombie/dragon)
+
+// Genome data (polled from /api/genome for mutation tracking)
+let genomeData = null; // { genes: { argumentDepth, adversarialIntensity, ... }, generation, ... }
 
 function drawBlock(ctx, x, y, w, h, fill, outline) {
   if (outline === undefined) outline = true;
