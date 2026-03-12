@@ -242,8 +242,10 @@ function findRelevantAgents(topic, agents, sourceAgent) {
     // Critic/devil's advocate always relevant for disagreements
     if (role.includes('critic') || role.includes('devil') || role.includes('antagonist')) score += 1;
 
-    // Base score so no one is completely excluded
-    score += Math.random() * 0.5;
+    // Base score: deterministic jitter from name hash (not Math.random!) for consistency
+    var agentHash = 0;
+    for (var ci = 0; ci < a.name.length; ci++) { agentHash = ((agentHash << 5) - agentHash + a.name.charCodeAt(ci)) | 0; }
+    score += (Math.abs(agentHash) % 100) / 200; // 0 to 0.5, deterministic
 
     return { name: a.name, role: a.role, score };
   });
