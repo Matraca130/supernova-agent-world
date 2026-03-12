@@ -29,6 +29,14 @@ const { buildRoundSynthesis, buildDebatePrompt } = require('./prompt-builder.cjs
 const { extractPerformanceSignals, autoUpdateCompetence, loadCompetences, saveCompetences } = require('./sm2-lite.cjs');
 const { scoreResponse, generateFeedbackInstruction } = require('./quality-gate.cjs');
 
+// Micro-orchestrator: automatic topic decomposition & micro-round execution
+let microOrchestrator;
+try {
+  microOrchestrator = require('./micro-orchestrator.cjs');
+} catch (err) {
+  microOrchestrator = null;
+}
+
 // Strategy genome functions (loaded with try/catch for backward compatibility)
 let loadGenome, expressGenome, deepFreeze, mutateGenome, saveGenome, appendHistory, rollbackGenome;
 try {
