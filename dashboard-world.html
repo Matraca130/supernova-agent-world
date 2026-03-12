@@ -2104,11 +2104,259 @@ function gameLoop(time) {
 }
 
 // =====================================================================
+// DEMO MODE: 40 simultaneous agents with full activity
+// Activates with ?demo=40 or when no live debate is found after 5s
+// =====================================================================
+const DEMO_AGENTS = [
+  { name: 'arquitecto-software', role: 'Arquitecto de Software' },
+  { name: 'critico-tecnico', role: 'Crítico Técnico' },
+  { name: 'ship-fast-founder', role: 'Ship-Fast Founder' },
+  { name: 'security-hardliner', role: 'Security Hardliner' },
+  { name: 'junior-dev-mantenedor', role: 'Junior Dev Mantenedor' },
+  { name: 'medico-clinico', role: 'Médico Clínico' },
+  { name: 'investigador-radical', role: 'Investigador Radical' },
+  { name: 'paciente-advocate', role: 'Paciente Advocate' },
+  { name: 'eticista', role: 'Eticista Bioético' },
+  { name: 'cost-optimizer', role: 'Cost Optimizer' },
+  { name: 'defensor', role: 'Defensor Legal' },
+  { name: 'devils-advocate', role: 'Devil\'s Advocate' },
+  { name: 'mediador-provocador', role: 'Mediador Provocador' },
+  { name: 'analista-datos', role: 'Analista de Datos' },
+  { name: 'estratega-largo-plazo', role: 'Estratega Largo Plazo' },
+  { name: 'abogado-usuario-final', role: 'Abogado Usuario Final' },
+  { name: 'optimizador-costos', role: 'Optimizador de Costos' },
+  { name: 'innovador-disruptivo', role: 'Innovador Disruptivo' },
+  { name: 'integrador-sistemas', role: 'Integrador de Sistemas' },
+  { name: 'historiador-lecciones', role: 'Historiador de Lecciones' },
+  { name: 'simplificador', role: 'Simplificador' },
+  { name: 'esceptico-metodico', role: 'Escéptico Metódico' },
+  { name: 'visionario-futuro', role: 'Visionario del Futuro' },
+  { name: 'dragon-architect', role: 'Dragon Architect' },
+  { name: 'phoenix-researcher', role: 'Phoenix Researcher' },
+  { name: 'hydra-analyst', role: 'Hydra Data Analyst' },
+  { name: 'chimera-strategist', role: 'Chimera Strategist' },
+  { name: 'cerberus-guardian', role: 'Cerberus Security' },
+  { name: 'griffin-innovator', role: 'Griffin Innovator' },
+  { name: 'kraken-devops', role: 'Kraken DevOps' },
+  { name: 'sphinx-ethics', role: 'Sphinx Ethics' },
+  { name: 'basilisk-qa', role: 'Basilisk QA' },
+  { name: 'wyvern-frontend', role: 'Wyvern Frontend' },
+  { name: 'leviathan-backend', role: 'Leviathan Backend' },
+  { name: 'minotaur-pm', role: 'Minotaur PM' },
+  { name: 'pegasus-ux', role: 'Pegasus UX Designer' },
+  { name: 'fenix-ml-ops', role: 'Fenix ML Ops' },
+  { name: 'golem-infra', role: 'Golem Infrastructure' },
+  { name: 'naga-database', role: 'Naga Database Admin' },
+  { name: 'titan-scaler', role: 'Titan Auto-Scaler' },
+];
+
+const DEMO_DIALOGUE = [
+  'Propongo usar microservicios con event sourcing para escalar horizontalmente',
+  'No estoy de acuerdo, un monolito modular sería más eficiente a esta escala',
+  'Los datos muestran 99.97% uptime con la arquitectura actual, ¿para qué cambiar?',
+  'Consideremos el impacto ético de automatizar esas decisiones sin supervisión humana',
+  'El ROI de esa migración no justifica el riesgo en los próximos 18 meses',
+  'He visto este patrón fallar en 3 empresas similares. Documentación histórica lo confirma',
+  'PERO, si implementamos feature flags, podemos hacer la migración gradualmente',
+  'La seguridad del sistema actual tiene 4 vulnerabilidades críticas sin parchear',
+  'El usuario final no notaría diferencia. Deberíamos enfocarnos en UX primero',
+  'Mis modelos predictivos sugieren un 78% de probabilidad de éxito con el plan B',
+  'Necesitamos un POC de 2 semanas antes de comprometer recursos del equipo',
+  'La deuda técnica acumulada hace inviable cualquier feature nueva sin refactoring',
+  'Podríamos resolver esto con un CQRS pattern y event-driven architecture',
+  'Los tests de carga muestran degradación del 40% sobre 10K requests/segundo',
+  'Desde la perspectiva legal, GDPR requiere que esos datos se procesen en EU',
+  'Mi análisis de sentimiento detecta 3 puntos de divergencia en esta discusión',
+  'Simplifiquemos: ¿cuál es el problema real que estamos tratando de resolver?',
+  'La IA generativa podría automatizar el 60% de ese pipeline de datos',
+  'SIN EMBARGO, la latencia P99 aumentaría a 800ms, inaceptable para real-time',
+  'Propongo un sub-comité de 4 agentes para analizar el tema de escalabilidad',
+  '[SUBTEMA PROPUESTO: Migración gradual vs big-bang para el sistema de pagos]',
+  'Los costos de cloud se reducirían un 35% con spot instances y auto-scaling',
+  'El framework actual está en EOL en 6 meses. La decisión no puede esperar',
+  'Integrar con el API existente requiere un adapter pattern con circuit breaker',
+  'La cobertura de tests está en 43%. No deberíamos deployar nada nuevo hasta 80%',
+  'He ejecutado 10 mil simulaciones Monte Carlo, el riesgo es tolerable al 95% CI',
+  'El principio de menor sorpresa dicta que mantengamos la API backward-compatible',
+  'Puedo implementar un MVP funcional en 3 sprints si me asignan 2 devs senior',
+  'La competencia lanzó algo similar hace 2 meses con resultados mixtos',
+  'Recomiendo A/B testing con el 5% del tráfico antes de cualquier rollout',
+  'La documentación actual es insuficiente para onboarding de nuevos contributors',
+  'Kubernetes + Istio resolvería el service mesh, pero agrega complejidad operativa',
+  'Desde el punto de vista del paciente, la latencia de 2 segundos es inaceptable',
+  'Los logs muestran 847 errores silenciosos en las últimas 24 horas',
+  'Pregunta: ¿alguien ha evaluado el impacto en el equipo de soporte técnico?',
+  'Mi modelo de costos indica que la opción C ahorra $120K/año vs opción A',
+  'La interoperabilidad con sistemas legacy es el elefante en la habitación',
+  'Propongo GraphQL federation para unificar los 7 microservicios existentes',
+  'El technical debt score de SonarQube pasó de B a D en el último quarter',
+  'Necesitamos consensus en 3 puntos clave antes de avanzar al siguiente sprint',
+];
+
+const DEMO_SUBTOPICS = [
+  { subtopic: 'Migración monolito→microservicios', room: 'debate', agents: [] },
+  { subtopic: 'Análisis ROI cloud migration', room: 'reason', agents: [] },
+  { subtopic: 'Security audit framework EOL', room: 'github', agents: [] },
+  { subtopic: 'UX latency requirements P99', room: 'kb', agents: [] },
+  { subtopic: 'Ethical AI automation governance', room: 'stats', agents: [] },
+];
+
+let demoMode = false;
+let demoTimer = 0;
+let demoFallbackTimer = null;
+
+function startDemoMode(count) {
+  count = Math.min(count || 40, DEMO_AGENTS.length);
+  demoMode = true;
+
+  document.getElementById('topicDisplay').textContent = '¿Microservicios vs Monolito para sistema de pagos en salud?';
+  document.getElementById('roundDisplay').textContent = '7/12';
+  document.getElementById('phaseDisplay').textContent = '🔬 DEMO — 40 agentes simultáneos';
+  document.getElementById('agentCountDisplay').textContent = count;
+  document.getElementById('statusText').textContent = '🎮 DEMO MODE — ' + count + ' agents';
+
+  // Simulate genome data
+  genomeData = {
+    generation: 47,
+    genes: {
+      argumentDepth: 0.72,
+      adversarialIntensity: 0.58,
+      concisenessPreference: 0.45,
+      explorationRate: 0.68,
+      collaborationBias: 0.71,
+      decompositionAffinity: 0.63,
+    },
+    fitnessEMA: 0.74,
+    historyLength: 184,
+  };
+
+  // Spawn agents
+  const rooms = Object.keys(ROOMS);
+  for (let i = 0; i < count; i++) {
+    const da = DEMO_AGENTS[i];
+    const startRoom = rooms[i % rooms.length];
+    agents[da.name] = new Agent(da.name, getAgentColor(da.name), startRoom);
+    agents[da.name].role = da.role;
+    agents[da.name].messageCount = Math.floor(Math.random() * 25) + 3;
+    agents[da.name].isVirtual = true;
+  }
+  agentArr = Object.values(agents);
+
+  // Set up micro-round demo (assigns ~15 agents to subtopics)
+  microPhaseActive = true;
+  DEMO_SUBTOPICS.forEach((st, si) => {
+    const assigned = agentArr.slice(si * 3, si * 3 + 3 + Math.floor(Math.random() * 2));
+    st.agents = assigned.map(a => a.name);
+    assigned.forEach(a => {
+      microAssignments[a.name] = {
+        subtopic: st.subtopic,
+        room: st.room,
+        status: si < 3 ? 'debating' : 'concluded',
+      };
+    });
+  });
+
+  // Start activity loop
+  demoActivityLoop();
+  renderAgentCards();
+  renderGenomeBar();
+
+  console.log(`🎮 SUPERNOBA DEMO: ${count} agents spawned with genome Gen ${genomeData.generation}`);
+}
+
+function demoActivityLoop() {
+  if (!demoMode) return;
+
+  const now = Date.now();
+  const rooms = Object.keys(ROOMS);
+
+  // Every tick, ~3-6 agents do something
+  const actionsPerTick = 3 + Math.floor(Math.random() * 4);
+  for (let a = 0; a < actionsPerTick; a++) {
+    const agent = agentArr[Math.floor(Math.random() * agentArr.length)];
+    if (!agent) continue;
+
+    const action = Math.random();
+
+    if (action < 0.35) {
+      // Move to a different room
+      const targetRoom = rooms[Math.floor(Math.random() * rooms.length)];
+      agent.moveTo(targetRoom);
+      updateAgentState(agent.name, 'thinking');
+    } else if (action < 0.65) {
+      // Speak
+      const line = DEMO_DIALOGUE[Math.floor(Math.random() * DEMO_DIALOGUE.length)];
+      agent.showBubble(line, 4000 + Math.random() * 4000);
+      agent.moveTo('debate');
+      updateAgentState(agent.name, 'speaking');
+      agent.messageCount++;
+    } else if (action < 0.82) {
+      // Think
+      updateAgentState(agent.name, 'thinking');
+      agent.moveTo('reason');
+    } else if (action < 0.92) {
+      // Go to GitHub / KB
+      agent.moveTo(Math.random() > 0.5 ? 'github' : 'kb');
+      updateAgentState(agent.name, 'reflecting');
+    } else {
+      // Go to lounge (break)
+      agent.moveTo('lounge');
+      updateAgentState(agent.name, 'idle');
+    }
+  }
+
+  // Evolve genome slightly over time
+  if (Math.random() < 0.1 && genomeData) {
+    var genes = genomeData.genes;
+    var geneKeys = Object.keys(genes);
+    var gk = geneKeys[Math.floor(Math.random() * geneKeys.length)];
+    genes[gk] = Math.max(0, Math.min(1, genes[gk] + (Math.random() - 0.5) * 0.04));
+    genomeData.generation++;
+  }
+
+  // Rotate micro-round statuses
+  if (Math.random() < 0.05) {
+    var mk = Object.keys(microAssignments);
+    if (mk.length > 0) {
+      var rk = mk[Math.floor(Math.random() * mk.length)];
+      microAssignments[rk].status = microAssignments[rk].status === 'debating' ? 'concluded' : 'debating';
+    }
+  }
+
+  // Update cards periodically
+  demoTimer++;
+  if (demoTimer % 5 === 0) {
+    renderAgentCards();
+    renderGenomeBar();
+  }
+
+  setTimeout(demoActivityLoop, 800 + Math.random() * 600);
+}
+
+// =====================================================================
 // INIT
 // =====================================================================
 renderRoomLegend();
-pollWorld();
-setInterval(pollWorld, POLL_MS);
+
+// Check URL params for demo mode
+const urlParams = new URLSearchParams(window.location.search);
+const demoCount = parseInt(urlParams.get('demo'));
+
+if (demoCount > 0) {
+  // Explicit demo mode via URL
+  startDemoMode(demoCount);
+} else {
+  // Normal mode: poll for live debate, fallback to demo after 5s
+  pollWorld();
+  setInterval(pollWorld, POLL_MS);
+  demoFallbackTimer = setTimeout(function() {
+    if (agentArr.length === 0) {
+      console.log('No live debate detected after 5s, starting demo mode with 40 agents...');
+      startDemoMode(40);
+    }
+  }, 5000);
+}
+
 requestAnimationFrame(gameLoop);
 camY = -40;
 </script>
