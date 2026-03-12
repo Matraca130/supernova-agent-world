@@ -1474,13 +1474,18 @@ function renderAgentCards() {
   function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
   container.innerHTML = agentArr.map(a => {
     const roomLabel = ROOMS[a.room]?.label || a.room;
+    const state = getAgentState(a.name);
+    const stateEmoji = state.state === 'thinking' ? '💡' : state.state === 'speaking' ? '🗣️' : state.state === 'reflecting' ? '🤔' : '⏸️';
+    const stateLabel = state.state === 'thinking' ? 'Thinking...' : state.state === 'speaking' ? 'Speaking' : state.state === 'reflecting' ? 'Reflecting' : 'Idle';
+    const stateColor = state.state === 'thinking' ? 'var(--yellow)' : state.state === 'speaking' ? 'var(--green)' : state.state === 'reflecting' ? 'var(--blue)' : 'var(--text-dim)';
     return `<div class="agent-card" style="border-left-color:${esc(a.color)}">
       <div class="agent-card-header">
-        <div class="agent-dot" style="background:${esc(a.color)}"></div>
+        <div class="agent-dot" style="background:${esc(a.color)}${state.state === 'thinking' ? ';animation:pulse 1.5s infinite' : ''}"></div>
         <div class="agent-card-name">${esc(a.name)}</div>
         <div class="agent-card-room">${esc(roomLabel)}</div>
       </div>
       <div style="font-size:10px;color:var(--text-dim)">${esc(a.role)} | ${a.messageCount} msgs</div>
+      <div style="font-size:10px;color:${stateColor};margin-top:2px">${stateEmoji} ${stateLabel}</div>
       ${a.bubble ? `<div class="agent-card-bubble">"${esc(a.bubble)}"</div>` : ''}
     </div>`;
   }).join('');
