@@ -1086,6 +1086,295 @@ function drawAgentHabbo(agent) {
   if (agent.bubble) { drawBubble(agent, sx, sy - 65); }
 }
 
+// =====================================================================
+// DRAGON PIXEL ART CHARACTER
+// =====================================================================
+const DRAGON_SCALES = ['#27ae60','#2980b9','#8e44ad','#c0392b','#d35400','#1abc9c','#2c3e50','#e74c3c','#16a085','#f39c12'];
+const DRAGON_BELLY = ['#2ecc71','#3498db','#9b59b6','#e74c3c','#e67e22','#1dd1a1','#34495e','#ff6b6b','#00d2d3','#feca57'];
+const DRAGON_TYPES = ['fire','ice','shadow','nature','electric','void','gold','blood'];
+const DRAGON_HORNS = ['curved','straight','crown','ram','demon','antler','spike','none'];
+const DRAGON_WINGS_STYLES = ['bat','feathered','membrane','torn','crystal','flame'];
+
+function drawAgentDragon(agent) {
+  const pos = toScreen(agent.x, agent.y);
+  const sx = pos.x, sy = pos.y;
+  const f = agent.facing;
+  const walking = agent.path.length > 0;
+  const frame = agent.walkFrame;
+  const breathe = agent.idle ? Math.sin(agent.idleTimer * 1.2) * 0.4 : 0;
+  const bodyBob = breathe;
+  const legOffset = walking ? Math.sin(frame * Math.PI / 2) * 3 : 0;
+  const armSwing = walking ? Math.sin(frame * Math.PI / 2) * 2.5 : Math.sin(agent.idleTimer * 0.6) * 0.5;
+  const wingFlap = Math.sin(agent.idleTimer * 2.5) * 3;
+  const tailWag = Math.sin(agent.idleTimer * 1.8) * 2;
+
+  if (!agent._hashInit) {
+    var h = nameHash(agent.name);
+    agent._dScales = DRAGON_SCALES[h % DRAGON_SCALES.length];
+    agent._dBelly = DRAGON_BELLY[h % DRAGON_BELLY.length];
+    agent._dType = DRAGON_TYPES[(h >> 3) % DRAGON_TYPES.length];
+    agent._dHorns = DRAGON_HORNS[(h >> 5) % DRAGON_HORNS.length];
+    agent._dWings = DRAGON_WINGS_STYLES[(h >> 7) % DRAGON_WINGS_STYLES.length];
+    agent._dEye = ZOMBIE_EYE_COLORS[(h >> 9) % ZOMBIE_EYE_COLORS.length];
+    agent._creatureType = 'dragon';
+    agent._hasDragon = false;
+    agent._hashInit = true;
+  }
+  var sc = agent._dScales, bl = agent._dBelly;
+
+  ctx.save();
+  ctx.translate(sx, sy);
+
+  // Glow
+  if (agent.glowAlpha > 0) {
+    const ga = Math.floor(agent.glowAlpha * 50).toString(16).padStart(2,'0');
+    ctx.beginPath(); ctx.arc(0, -16, 30, 0, Math.PI*2);
+    ctx.fillStyle = sc + ga; ctx.fill();
+  }
+
+  // Shadow
+  ctx.beginPath(); ctx.ellipse(0, 6, 15, 5, 0, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fill();
+
+  // === TAIL (behind body) ===
+  drawBlock(ctx, -12*f, 0+tailWag*0.3, 6, 3, sc);
+  drawBlock(ctx, -17*f, -1+tailWag*0.6, 5, 3, sc);
+  drawBlock(ctx, -21*f, -2+tailWag, 4, 2, lightenColor(sc, 10));
+  // Tail tip (varies by type)
+  if (agent._dType === 'fire' || agent._dType === 'blood') {
+    drawBlock(ctx, -24*f, -3+tailWag, 3, 3, '#e74c3c', false);
+    drawBlock(ctx, -23*f, -4+tailWag, 2, 1, '#f39c12', false);
+  } else if (agent._dType === 'ice') {
+    drawBlock(ctx, -24*f, -3+tailWag, 4, 2, '#74b9ff', false);
+  } else {
+    drawBlock(ctx, -24*f, -3+tailWag, 3, 3, lightenColor(sc, 30), false);
+  }
+
+  // === FEET (dragon claws) ===
+  var feetY = 2 + bodyBob;
+  drawBlock(ctx, -5+legOffset*0.3, feetY, 5, 3, darkenColor(sc, 30));
+  drawBlock(ctx, 1-legOffset*0.3, feetY, 5, 3, darkenColor(sc, 30));
+  // Claws
+  drawBlock(ctx, -6+legOffset*0.3, feetY+2, 2, 1, '#ddd', false);
+  drawBlock(ctx, 5-legOffset*0.3, feetY+2, 2, 1, '#ddd', false);
+
+  // === LEGS (muscular dragon legs) ===
+  var legY = feetY - 8;
+  drawBlock(ctx, -5+legOffset*0.4, legY, 5, 8, sc);
+  drawBlock(ctx, 1-legOffset*0.4, legY, 5, 8, sc);
+  drawBlock(ctx, -4+legOffset*0.4, legY+1, 3, 3, lightenColor(sc, 15), false);
+  drawBlock(ctx, 2-legOffset*0.4, legY+1, 3, 3, lightenColor(sc, 15), false);
+
+  // === TORSO (broad dragon chest) ===
+  var torsoY = legY - 13 + bodyBob;
+  drawBlock(ctx, -8, torsoY, 16, 14, sc);
+  // Belly plates
+  drawBlock(ctx, -5, torsoY+3, 10, 9, bl);
+  drawBlock(ctx, -4, torsoY+4, 8, 2, lightenColor(bl, 15), false);
+  drawBlock(ctx, -4, torsoY+7, 8, 2, lightenColor(bl, 10), false);
+  drawBlock(ctx, -4, torsoY+10, 8, 2, lightenColor(bl, 5), false);
+
+  // === WINGS (behind arms) ===
+  var wingY = torsoY - 2 + wingFlap;
+  var wingX = f > 0 ? -9 : 2;
+  if (agent._dWings !== 'none') {
+    // Wing membrane
+    drawBlock(ctx, wingX - 8*f, wingY, 8, 12, sc + '88');
+    drawBlock(ctx, wingX - 14*f, wingY-2, 6, 8, sc + '66');
+    // Wing bones
+    drawBlock(ctx, wingX - 2*f, wingY+1, 2, 10, darkenColor(sc, 20));
+    drawBlock(ctx, wingX - 8*f, wingY, 2, 8, darkenColor(sc, 20));
+    if (agent._dWings === 'torn') {
+      // Holes in wings
+      drawBlock(ctx, wingX - 10*f, wingY+3, 3, 3, '#0f0f1a', false);
+    }
+    if (agent._dWings === 'flame') {
+      drawBlock(ctx, wingX - 14*f, wingY+6, 4, 3, '#e74c3c88', false);
+      drawBlock(ctx, wingX - 12*f, wingY+8, 3, 2, '#f39c1288', false);
+    }
+  }
+
+  // === ARMS (dragon arms with claws) ===
+  var armY = torsoY + 2;
+  drawBlock(ctx, -10, armY+armSwing, 3, 9, sc);
+  drawBlock(ctx, 7, armY-armSwing, 3, 9, sc);
+  // Clawed hands
+  drawBlock(ctx, -11, armY+9+armSwing, 4, 3, lightenColor(sc, 10), false);
+  drawBlock(ctx, 7, armY+9-armSwing, 4, 3, lightenColor(sc, 10), false);
+  drawBlock(ctx, -11, armY+11+armSwing, 1, 2, '#ddd', false);
+  drawBlock(ctx, 10, armY+11-armSwing, 1, 2, '#ddd', false);
+
+  // === HEAD (dragon head with snout) ===
+  var headY = torsoY - 11 + bodyBob;
+  // Main head
+  drawBlock(ctx, -7, headY, 14, 10, sc);
+  // Snout (protruding forward)
+  drawBlock(ctx, f > 0 ? 5 : -9, headY+3, 5, 5, sc);
+  drawBlock(ctx, f > 0 ? 5 : -9, headY+5, 5, 3, bl, false); // snout belly
+  // Nostrils
+  var nOff = f > 0 ? 8 : -6;
+  if (agent.bubble) {
+    // Fire breath!
+    var fireT = agent.idleTimer * 5;
+    drawBlock(ctx, nOff + f*4, headY+3, 4, 2, '#e74c3c', false);
+    drawBlock(ctx, nOff + f*7, headY+2, 3, 3, '#f39c12', false);
+    drawBlock(ctx, nOff + f*9, headY+1, 2, 2, '#ffeaa7', false);
+  } else {
+    drawBlock(ctx, nOff, headY+4, 1, 1, '#1a1a1a', false);
+    drawBlock(ctx, nOff+2, headY+4, 1, 1, '#1a1a1a', false);
+  }
+  // Eyes (glowing)
+  if (!agent.blinking) {
+    var ex1 = f > 0 ? -3 : 0, ex2 = f > 0 ? 2 : 5;
+    drawBlock(ctx, ex1, headY+2, 3, 3, '#1a1a1a', false);
+    drawBlock(ctx, ex2, headY+2, 3, 3, '#1a1a1a', false);
+    drawBlock(ctx, ex1+1, headY+3, 1, 1, agent._dEye, false);
+    drawBlock(ctx, ex2+1, headY+3, 1, 1, agent._dEye, false);
+  } else {
+    var ex1 = f > 0 ? -3 : 0, ex2 = f > 0 ? 2 : 5;
+    drawBlock(ctx, ex1, headY+3, 3, 1, '#1a1a1a', false);
+    drawBlock(ctx, ex2, headY+3, 3, 1, '#1a1a1a', false);
+  }
+
+  // === HORNS ===
+  switch(agent._dHorns) {
+    case 'curved':
+      drawBlock(ctx, -6, headY-4, 3, 4, darkenColor(sc, 20));
+      drawBlock(ctx, -8, headY-6, 2, 3, darkenColor(sc, 30));
+      drawBlock(ctx, 3, headY-4, 3, 4, darkenColor(sc, 20));
+      drawBlock(ctx, 5, headY-6, 2, 3, darkenColor(sc, 30)); break;
+    case 'straight':
+      drawBlock(ctx, -5, headY-6, 2, 6, '#e8dcc8');
+      drawBlock(ctx, 3, headY-6, 2, 6, '#e8dcc8'); break;
+    case 'crown':
+      drawBlock(ctx, -6, headY-3, 12, 2, '#f1c40f');
+      drawBlock(ctx, -4, headY-6, 2, 3, '#f1c40f');
+      drawBlock(ctx, -1, headY-7, 2, 4, '#f1c40f');
+      drawBlock(ctx, 2, headY-6, 2, 3, '#f1c40f'); break;
+    case 'ram':
+      drawBlock(ctx, -8, headY-2, 3, 5, darkenColor(sc, 25));
+      drawBlock(ctx, -9, headY+2, 2, 3, darkenColor(sc, 30));
+      drawBlock(ctx, 5, headY-2, 3, 5, darkenColor(sc, 25));
+      drawBlock(ctx, 6, headY+2, 2, 3, darkenColor(sc, 30)); break;
+    case 'demon':
+      drawBlock(ctx, -7, headY-5, 2, 5, '#8b0000');
+      drawBlock(ctx, -8, headY-7, 2, 3, '#a00000');
+      drawBlock(ctx, 5, headY-5, 2, 5, '#8b0000');
+      drawBlock(ctx, 6, headY-7, 2, 3, '#a00000'); break;
+    case 'spike':
+      drawBlock(ctx, -4, headY-4, 2, 3, sc);
+      drawBlock(ctx, -1, headY-6, 2, 5, lightenColor(sc, 15));
+      drawBlock(ctx, 2, headY-4, 2, 3, sc); break;
+    default: // antler, none
+      drawBlock(ctx, -6, headY-3, 12, 3, darkenColor(sc, 15)); break;
+  }
+
+  // Spinal ridge (down the back)
+  for (var ri = 0; ri < 4; ri++) {
+    drawBlock(ctx, -1, torsoY - 2 + ri * 4, 2, 3, darkenColor(sc, 15), false);
+  }
+
+  // === NAME TAG ===
+  var label = agent._labelText || agent.name.substring(0, 10);
+  var tw = agent.getLabelWidth(ctx);
+  ctx.imageSmoothingEnabled = true;
+  ctx.fillStyle = 'rgba(10,10,25,0.85)';
+  ctx.fillRect(Math.round(-tw/2-5), headY-24, tw+10, 13);
+  ctx.strokeStyle = sc + '88'; ctx.lineWidth = 1;
+  ctx.strokeRect(Math.round(-tw/2-5)+0.5, headY-24+0.5, tw+9, 12);
+  ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+  ctx.fillStyle = agent.color;
+  ctx.fillText(label, 0, headY-14);
+  ctx.imageSmoothingEnabled = false;
+
+  ctx.restore();
+
+  // Thinking indicator
+  const agentState = getAgentState(agent.name);
+  if (agentState.state === 'thinking' && !agent.bubble) {
+    ctx.save();
+    ctx.translate(sx, sy);
+    const dotTime = Date.now() / 500;
+    for (let di = 0; di < 3; di++) {
+      const bounce = Math.sin(dotTime + di * 0.9) * 3;
+      const alpha = (Math.sin(dotTime + di * 0.9) + 1) / 2;
+      ctx.globalAlpha = 0.3 + alpha * 0.7;
+      ctx.fillStyle = sc;
+      ctx.beginPath();
+      ctx.arc(-4 + di * 4, headY - 30 + bounce, 1.5 + di * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  if (agent.bubble) { drawBubble(agent, sx, sy - 65); }
+}
+
+// =====================================================================
+// GENOME-LINKED MUTATION SYSTEM
+// Maps Strategy Genome genes → visual creature mutations
+// =====================================================================
+function applyGenomeMutations(agent) {
+  if (!genomeData || !genomeData.genes || agent._genomeApplied) return;
+  var g = genomeData.genes;
+  var h = nameHash(agent.name);
+
+  // explorationRate high → more likely to be a dragon
+  if (g.explorationRate > 0.6 && (h % 3 === 0)) {
+    agent._creatureType = 'dragon';
+  }
+
+  // argumentDepth high → exposed_brain heads for zombies
+  if (agent._creatureType !== 'dragon' && g.argumentDepth > 0.65) {
+    if (h % 4 < 2) agent._zHead = 'exposed_brain';
+  }
+
+  // adversarialIntensity high → more wounds, red eyes
+  if (agent._creatureType !== 'dragon' && g.adversarialIntensity > 0.6) {
+    agent._zEye = '#e74c3c';
+    if (h % 3 === 0) agent._zExtra = 'blood_drip';
+  }
+
+  // collaborationBias high → chain extras (connected)
+  if (agent._creatureType !== 'dragon' && g.collaborationBias > 0.65) {
+    if (h % 3 === 1) agent._zExtra = 'chain';
+  }
+
+  // decompositionAffinity high → antenna/bolt_neck (analytical)
+  if (g.decompositionAffinity > 0.6) {
+    if (agent._creatureType !== 'dragon' && h % 3 === 2) agent._zExtra = 'bolt_neck';
+    if (agent._creatureType === 'dragon' && h % 2 === 0) agent._dHorns = 'crown';
+  }
+
+  // concisenessPreference high → leaner body
+  if (agent._creatureType !== 'dragon' && g.concisenessPreference > 0.65) {
+    agent._zShoulderW = Math.max(12, (agent._zShoulderW || 14) - 2);
+  }
+
+  agent._genomeApplied = true;
+  agent._mutations = getAgentMutationList(agent);
+}
+
+function getAgentMutationList(agent) {
+  var muts = [];
+  if (agent._creatureType === 'dragon') {
+    muts.push('\u{1F409} ' + (agent._dType || 'dragon'));
+    if (agent._dHorns && agent._dHorns !== 'none') muts.push('\u{1F451} ' + agent._dHorns);
+    if (agent._dWings) muts.push('\u{1FA78} ' + agent._dWings);
+  } else {
+    muts.push('\u{1F9DF} zombie');
+    if (agent._zHead && agent._zHead !== 'normal') muts.push('\u{1F480} ' + agent._zHead);
+    if (agent._zExtra && agent._zExtra !== 'none') muts.push('\u26A1 ' + agent._zExtra);
+    if (agent._zEye) {
+      var eyeName = agent._zEye === '#f1c40f' ? 'gold' : agent._zEye === '#e74c3c' ? 'crimson' :
+        agent._zEye === '#2ecc71' ? 'toxic' : agent._zEye === '#e67e22' ? 'amber' : 'glow';
+      muts.push('\u{1F441} ' + eyeName);
+    }
+  }
+  return muts;
+}
+
 // ── Speech bubble PIXEL-ART (escalonado, dark blue, monospace) ──
 function drawBubble(agent, x, y) {
   var text = agent.bubble;
