@@ -413,6 +413,283 @@ Muestra:
       return { content: [{ type: 'text', text }] };
     }
   );
+  // ════════════════════════════════════════════════════════════════════════
+  // MICRO-TOPICS: Divide & Conquer for 10-Agent Debates
+  // ════════════════════════════════════════════════════════════════════════
+
+  // ── CREATE TOPIC TREE ────────────────────────────────────────────────────
+
+  server.tool(
+    'crear_arbol_temas',
+    `Crea un ÁRBOL DE TEMAS para divide & conquer.
+
+PARA QUÉ: Cuando tienes un tema grande y 6-10+ agentes, dividirlo en subtemas
+que se debaten en MICRO-DEBATES paralelos (rápidos, 2-3 rondas, 2-4 agentes cada uno).
+
+FLUJO:
+1. crear_arbol_temas → Crea el árbol
+2. sugerir_descomposicion → Sugiere cómo dividir el tema
+3. spawn_subtema → Crea micro-debates para cada subtema
+4. Los agentes debaten cada subtema rápidamente
+5. sintetizar_arbol → Fusiona todas las conclusiones
+
+VENTAJA: 10 agentes trabajan en paralelo en subtemas focalizados en vez de
+hablar todos del mismo tema grande.`,
+    {
+      debate_id: z.string().describe('ID del debate principal'),
+    },
+    async ({ debate_id }) => {
+      // Get debate info
+      const debates = dm.listDebates ? dm.listDebates() : [];
+      const debate = debates.find(d => d.id === debate_id);
+      if (!debate) {
+        return { content: [{ type: 'text', text: `❌ Debate ${debate_id} no encontrado` }] };
+      }
+
+      const result = mt.createTopicTree(
+        debate_id,
+        debate.topic,
+        debate.participants || []
+      );
+
+      if (result.error) {
+        return { content: [{ type: 'text', text: `❌ Error: ${result.error}` }] };
+      }
+
+      let text = `✅ ÁRBOL DE TEMAS CREADO\n\n`;
+      text += `🌳 Tree ID: ${result.treeId}\n`;
+      text += `📋 Tema: ${result.mainTopic}\n`;
+      text += `👥 Agentes: ${result.participantCount}\n\n`;
+      text += `💡 PRÓXIMOS PASOS:\n`;
+      text += `  1. Usa "sugerir_descomposicion" para obtener subtemas sugeridos\n`;
+      text += `  2. O usa "spawn_subtema" directamente si ya sabes los subtemas\n`;
+      text += `  3. Cuando todos terminen, usa "sintetizar_arbol" para fusionar conclusiones\n`;
+
+      return { content: [{ type: 'text', text }] };
+    }
+  );
+
+  // ── SUGGEST DECOMPOSITION ────────────────────────────────────────────────
+
+  server.tool(
+    'sugerir_descomposicion',
+    `Sugiere cómo descomponer un tema grande en subtemas micro.
+
+Genera 3-5 subtemas focalizados con agentes asignados para cada uno.
+Puedes usar las sugerencias directamente con "spawn_subtema" o modificarlas.`,
+    {
+      debate_id: z.string().describe('ID del debate principal'),
+    },
+    async ({ debate_id }) => {
+      const debates = dm.listDebates ? dm.listDebates() : [];
+      const debate = debates.find(d => d.id === debate_id);
+      if (!debate) {
+        return { content: [{ type: 'text', text: `❌ Debate ${debate_id} no encontrado` }] };
+      }
+
+      const result = mt.suggestDecomposition(
+        debate.topic,
+        debate.participants || []
+      );
+
+      let text = `🔬 DESCOMPOSICIÓN SUGERIDA\n\n`;
+      text += `📋 Tema principal: ${result.mainTopic}\n`;
+      text += `📊 ${result.subtopicCount} subtemas × ${result.agentsPerSubtopic} agentes/subtema\n\n`;
+
+      for (const s of result.suggestions) {
+        text += `\n  🎯 ${s.subtopic}\n`;
+        text += `     ${s.description}\n`;
+        text += `     👥 Agentes: ${s.suggestedAgents.join(', ')}\n`;
+        text += `     ⏱️ Rondas: ${s.suggestedRounds}\n`;
+      }
+
+      text += `\n\n💡 Usa "spawn_subtema" con tree_id para crear cada micro-debate.\n`;
+      text += `   Los agentes pueden debatir subtemas EN PARALELO.\n`;
+
+      return { content: [{ type: 'text', text }] };
+    }
+  );
+
+  // ── SPAWN SUBTOPIC ───────────────────────────────────────────────────────
+
+  server.tool(
+    'spawn_subtema',
+    `Crea un MICRO-DEBATE focalizado en un subtema específico.
+
+CARACTERÍSTICAS:
+- Rápido: 2-3 rondas (no 10)
+- Focalizado: Solo el subtema, no el tema completo
+- Pequeño: 2-4 agentes (no todos)
+- Orientado a conclusiones: Cada mensaje debe llegar a una conclusión parcial
+
+Puede crear subtemas ANIDADOS: un subtema puede generar sub-subtemas.`,
+    {
+      tree_id: z.string().describe('ID del árbol de temas (de crear_arbol_temas)'),
+      subtema: z.string().describe('El subtema específico a debatir'),
+      agentes: z.array(z.string()).describe('Nombres de los agentes que participarán (2-4)'),
+      rondas: z.number().optional().default(3).describe('Máximo de rondas (default: 3)'),
+      parent_subtema_id: z.string().optional().describe('ID del subtema padre (para anidamiento)'),
+    },
+    async ({ tree_id, subtema, agentes, rondas, parent_subtema_id }) => {
+      const result = mt.spawnSubtopic(tree_id, subtema, agentes, {
+        maxRounds: rondas,
+        intensity: 'micro',
+        parentSubtopicId: parent_subtema_id || null,
+      });
+
+      if (result.error) {
+        return { content: [{ type: 'text', text: `❌ Error: ${result.error}` }] };
+      }
+
+      let text = `✅ MICRO-DEBATE CREADO\n\n`;
+      text += `🔬 Subtema: ${result.topic}\n`;
+      text += `📋 Subtopic ID: ${result.subtopicId}\n`;
+      text += `🎯 Debate ID: ${result.debateId}\n`;
+      text += `👥 Agentes: ${result.agents.join(', ')}\n`;
+      text += `⏱️ Rondas: ${result.maxRounds}\n`;
+      if (result.parentSubtopicId) {
+        text += `🔗 Derivado de: ${result.parentSubtopicId}\n`;
+      }
+      text += `\n💡 Los agentes deben hacer onboarding y debatir en el debate ${result.debateId}.\n`;
+      text += `   Recuerda: es un MICRO-debate. Rápido, focalizado, con conclusiones.\n`;
+
+      return { content: [{ type: 'text', text }] };
+    }
+  );
+
+  // ── TREE STATUS ──────────────────────────────────────────────────────────
+
+  server.tool(
+    'estado_arbol',
+    `Muestra el estado completo del árbol de micro-debates.
+
+Incluye:
+- Vista en árbol visual
+- Subtemas activos vs completados
+- Conclusiones parciales
+- Si está listo para síntesis final`,
+    {
+      tree_id: z.string().describe('ID del árbol de temas'),
+    },
+    async ({ tree_id }) => {
+      const result = mt.getTreeStatus(tree_id);
+
+      if (result.error) {
+        return { content: [{ type: 'text', text: `❌ Error: ${result.error}` }] };
+      }
+
+      let text = `🌳 ESTADO DEL ÁRBOL DE TEMAS\n\n`;
+      text += `📋 Tema: ${result.mainTopic}\n`;
+      text += `📊 Estado: ${result.status.toUpperCase()}\n`;
+      text += `📈 Progreso: ${result.stats.completedSubtopics}/${result.stats.totalSubtopics} subtemas\n`;
+      text += `💬 Mensajes totales: ${result.stats.totalMessages}\n`;
+      text += `🎯 Listo para síntesis: ${result.readyForSynthesis ? 'SÍ ✓' : 'NO (subtemas activos)'}\n\n`;
+
+      text += `🌿 VISTA EN ÁRBOL:\n`;
+      text += result.treeView + '\n\n';
+
+      if (result.readyForSynthesis) {
+        text += `\n💡 ¡Todos los subtemas completados! Usa "sintetizar_arbol" para fusionar conclusiones.\n`;
+      } else {
+        const activeOnes = result.subtopics.filter(s => s.status === 'active');
+        if (activeOnes.length > 0) {
+          text += `\n⏳ SUBTEMAS ACTIVOS:\n`;
+          for (const s of activeOnes) {
+            text += `  🔄 ${s.topic} (debate: ${s.debateId}, agentes: ${s.agents.join(', ')})\n`;
+          }
+        }
+      }
+
+      return { content: [{ type: 'text', text }] };
+    }
+  );
+
+  // ── SYNTHESIZE TREE ──────────────────────────────────────────────────────
+
+  server.tool(
+    'sintetizar_arbol',
+    `Fusiona TODAS las conclusiones de los micro-debates en una síntesis final.
+
+REQUIERE: Todos los subtemas deben estar completados.
+
+QUÉ HACE:
+1. Auto-concluye cualquier micro-debate terminado
+2. Recopila todas las conclusiones
+3. Las ordena por confianza
+4. Genera una síntesis integrada
+5. La añade como contexto al debate principal`,
+    {
+      tree_id: z.string().describe('ID del árbol de temas'),
+    },
+    async ({ tree_id }) => {
+      const result = mt.synthesizeTree(tree_id);
+
+      if (result.error) {
+        let text = `❌ ${result.error}\n`;
+        if (result.activeSubtopics) {
+          text += `\n⏳ Subtemas aún activos:\n`;
+          for (const s of result.activeSubtopics) {
+            text += `  • ${s.topic} (debate: ${s.debateId})\n`;
+          }
+        }
+        return { content: [{ type: 'text', text }] };
+      }
+
+      let text = `✅ SÍNTESIS COMPLETA\n\n`;
+      text += `📋 Tema: ${result.mainTopic}\n`;
+      text += `📊 Subtemas analizados: ${result.subtopicsAnalyzed}\n`;
+      text += `💬 Mensajes totales: ${result.totalMessages}\n`;
+      text += `📌 Contexto añadido al debate: ${result.mainDebateId}\n\n`;
+
+      text += `🏆 TOP CONCLUSIONES (por confianza):\n`;
+      for (const c of result.topConclusions) {
+        text += `  [${((c.confidence || 0) * 100).toFixed(0)}%] ${c.topic}\n`;
+        text += `     → ${c.conclusion || '(implícita)'}\n\n`;
+      }
+
+      text += `\n📝 SÍNTESIS COMPLETA AÑADIDA AL DEBATE PRINCIPAL.\n`;
+      text += `Los agentes ahora pueden ver las conclusiones integradas.\n`;
+
+      return { content: [{ type: 'text', text }] };
+    }
+  );
+
+  // ── CONCLUDE SUBTOPIC ────────────────────────────────────────────────────
+
+  server.tool(
+    'concluir_subtema',
+    `Concluye manualmente un micro-debate y extrae sus conclusiones.
+
+Normalmente los micro-debates se auto-concluyen, pero puedes forzar
+la conclusión si crees que ya se dijo lo necesario.`,
+    {
+      tree_id: z.string().describe('ID del árbol de temas'),
+      subtema_id: z.string().describe('ID del subtema a concluir'),
+    },
+    async ({ tree_id, subtema_id }) => {
+      const result = mt.concludeSubtopic(tree_id, subtema_id);
+
+      if (result.error) {
+        return { content: [{ type: 'text', text: `❌ Error: ${result.error}` }] };
+      }
+
+      let text = `✅ SUBTEMA CONCLUIDO\n\n`;
+      text += `🔬 ${result.topic}\n`;
+      text += `📊 Mensajes: ${result.messageCount}\n`;
+      text += `🎯 Conclusiones: ${result.conclusionCount}\n`;
+      text += `📈 Confianza: ${((result.confidence || 0) * 100).toFixed(0)}%\n`;
+      text += `📋 Progreso: ${result.treeProgress}\n\n`;
+
+      if (result.conclusions.length > 0) {
+        text += `📌 CONCLUSIONES:\n`;
+        for (const c of result.conclusions) {
+          text += `  • [${c.author}] ${c.text}\n`;
+        }
+      }
+
+      return { content: [{ type: 'text', text }] };
+    }
+  );
 }
 
 module.exports = { registerSubGroupTools };
