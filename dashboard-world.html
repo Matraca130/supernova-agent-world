@@ -392,7 +392,7 @@ class Agent {
     const label = this.name.length > 12 ? this.name.substring(0, 10) + '..' : this.name;
     if (this._labelText !== label) {
       this._labelText = label;
-      ctx2d.font = 'bold 9px system-ui';
+      ctx2d.font = 'bold 9px monospace'; // Must match font used in drawAgentHabbo nametag
       this._labelCache = ctx2d.measureText(label).width;
     }
     return this._labelCache;
