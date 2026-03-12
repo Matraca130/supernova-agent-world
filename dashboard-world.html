@@ -1348,9 +1348,11 @@ async function pollWorld() {
     if (msgs.length > lastMsgCount) {
       for (let i = lastMsgCount; i < msgs.length; i++) {
         const m = msgs[i];
-        if (agents[m.name]) {
-          agents[m.name].showBubble(m.text, 6000);
-          agents[m.name].moveTo('debate');
+        // FIX: debate-manager uses participantName, not name
+        const agentKey = m.participantName || m.name;
+        if (agents[agentKey]) {
+          agents[agentKey].showBubble(m.text || m.preview || '', 6000);
+          agents[agentKey].moveTo('debate');
         }
       }
       lastMsgCount = msgs.length;
