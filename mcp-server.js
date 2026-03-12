@@ -2187,6 +2187,17 @@ async function startHttp(port) {
     }
   });
 
+  // ── API: Strategy Genome (for dashboard mutation visualization) ────
+  app.get('/api/genome', (req, res) => {
+    try {
+      const genome = require('./strategy-genome.cjs');
+      const stats = genome.getGenomeStats();
+      res.json({ genome: stats });
+    } catch {
+      res.json({ genome: null });
+    }
+  });
+
   // ── API: Micro-topics tree status ────────────────────────────────
   app.get('/api/micro-topics', (req, res) => {
     try {
