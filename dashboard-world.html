@@ -2048,8 +2048,9 @@ function gameLoop(time) {
   // Agents sorted by depth
   const sorted = agentArr.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x));
   for (let i = 0; i < sorted.length; i++) {
-    if (SPRITE_MODE === 'habbo') drawAgentHabbo(sorted[i]);
-    else drawAgent(sorted[i]);
+    const ag = sorted[i];
+    if (ag._creatureType === 'dragon') drawAgentDragon(ag);
+    else drawAgentHabbo(ag); // zombie
   }
 
   requestAnimationFrame(gameLoop);
