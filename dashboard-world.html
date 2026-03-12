@@ -321,10 +321,54 @@ class Agent {
   moveTo(roomId) {
     if (!ROOMS[roomId]) roomId = 'lounge';
     if (roomId === this.room && this.path.length === 0) return;
+    const oldRoom = this.room;
     this.room = roomId;
-    const dest = getRoomCenter(roomId);
-    const destX = dest.x + (Math.random() - 0.5) * 1.5;
-    const destY = dest.y + (Math.random() - 0.5) * 1;
+
+    // Anti-overlap: circular distribution based on agent index in room
+    const roomAgents = agentArr.filter(a => a.room === roomId && a.name !== this.name);
+    const slotIndex = roomAgents.length;
+    const totalSlots = roomAgents.length + 1;
+    const room = ROOMS[roomId];
+    const cx = room.x + room.w / 2;
+    const cy = room.y + room.h / 2;
+    // Distribute agents in a circle within the room (radius scales with room size)
+    const radius = Math.min(room.w, room.h) * 0.3;
+    const angle = (slotIndex / Math.max(totalSlots, 3)) * Math.PI * 2 + Math.PI / 4;
+    const destX = cx + Math.cos(angle) * radius;
+    const destY = cy + Math.sin(angle) * radius * 0.5; // Flatten for iso perspective
+
+    // Smart pathfinding: check if rooms are adjacent (skip hallway)
+    const oldRoomData = ROOMS[oldRoom];
+    const newRoomData = ROOMS[roomId];
+    if (oldRoomData && newRoomData) {
+      const oldCx = oldRoomData.x + oldRoomData.w / 2;
+      const oldCy = oldRoomData.y + oldRoomData.h / 2;
+      const newCx = newRoomData.x + newRoomData.w / 2;
+      const newCy = newRoomData.y + newRoomData.h / 2;
+      const dist = Math.sqrt((oldCx - newCx) ** 2 + (oldCy - newCy) ** 2);
+
+      // Adjacent rooms (distance < 8 tiles): direct path without hallway
+      if (dist < 8) {
+        this.path = [
+          { x: destX, y: destY }
+        ];
+        this.idle = false;
+        return;
+      }
+
+      // Same row rooms: go through hallway but shorter path
+      if (Math.abs(oldCy - newCy) < 3) {
+        this.path = [
+          { x: this.x, y: HALLWAY_Y },
+          { x: destX, y: HALLWAY_Y },
+          { x: destX, y: destY }
+        ];
+        this.idle = false;
+        return;
+      }
+    }
+
+    // Default: full hallway route for distant rooms
     this.path = [
       { x: this.x, y: HALLWAY_Y },
       { x: destX, y: HALLWAY_Y },
