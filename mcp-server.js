@@ -33,8 +33,9 @@ const require = createRequire(import.meta.url);
 const dm = require('./debate-manager.cjs');
 const validators = require('./validators.cjs');
 const sgTools = require('./sub-groups-tools.cjs');
-const orchestrator = require('./orchestrator-engine.cjs');
+// orchestrator-engine.cjs no longer used directly — genome/quality-gate called from debate-manager
 const triage = require('./triage-agent.cjs');
+const parallel = require('./parallel-turns.cjs');
 
 // ── Parse args ──────────────────────────────────────────────────────────
 
@@ -65,17 +66,80 @@ function broadcastOrchEvent(event) {
   }
 }
 
-// ── Registrar tools en un McpServer ──────────────────────────────────────
+// ── Tools que Figma Make NO necesita ver (se usan internamente) ──
+// Figma Make se traba si ve demasiadas tools — mantener set mínimo visible
+const INTERNAL_TOOLS = new Set([
+  'iniciar_debate', 'unirse', 'roles', 'avanzar_ronda',
+  'agregar_contexto', 'consultar_fuente', 'banco',
+  'turno', 'ronda_completa', 'decir_lote',
+  'situaciones', 'situacion', 'workflow_status',
+  'embedding_stats',
+  'revert_proposal', 'run_tests',
+  'list_proposals', 'governance_status',
+  'crear_canal', 'listar_canales', 'parallel_config',
+  'outcome_stats',
+]);
 
-function registerTools(server) {
+// ── Rate limiter: prevents AI agents from spamming the same tool ──────────
+const _rateLimiter = new Map(); // key: "agentName:toolName" → { count, firstCall }
+const RATE_LIMIT_MAX = 10;     // max calls per window (Figma Make external)
+const RATE_LIMIT_MAX_COORDINATED = 100; // higher limit for coordinated/loop tools
+const RATE_LIMIT_WINDOW = 60000; // 60 seconds
+
+// Track if a coordinated debate is active (relaxes rate limits on decir)
+let _coordinatedDebateActive = false;
+function setCoordinatedDebateActive(active) { _coordinatedDebateActive = active; }
+
+function checkRateLimit(toolName, params) {
+  // Extract agent identifier from common param names
+  const agent = params.nombre || params.agent_name || params.participante || null;
+  if (!agent) return null; // no agent identified, allow
+  const key = `${agent}:${toolName}`;
+  const now = Date.now();
+  const entry = _rateLimiter.get(key);
+  if (!entry || (now - entry.firstCall) > RATE_LIMIT_WINDOW) {
+    _rateLimiter.set(key, { count: 1, firstCall: now });
+    return null; // allowed
+  }
+  entry.count++;
+  // mi_turno needs high limit because agents poll it in a loop
+  const loopTools = new Set(['mi_turno', 'decir', 'leer', 'estado', 'read_project_file', 'list_project_files', 'digest']);
+  const limit = (_coordinatedDebateActive || loopTools.has(toolName)) ? RATE_LIMIT_MAX_COORDINATED : RATE_LIMIT_MAX;
+  if (entry.count > limit) {
+    return `Rate limited: ${agent} called ${toolName} ${entry.count} times in 60s. Wait before retrying.`;
+  }
+  return null; // allowed
+}
+
+// ── Registrar tools en un McpServer ──────────────────────────────────────
+// mode: 'essential' (12 tools para Figma Make) | 'all' (35 tools para stdio/debug)
+
+function registerTools(server, mode = 'essential') {
+  const registerTool = (name, ...restArgs) => {
+    if (mode === 'essential' && INTERNAL_TOOLS.has(name)) return; // Skip internal tools
+    // Wrap the handler (last arg) with rate limiting
+    const args = [...restArgs];
+    const originalHandler = args.pop();
+    const wrappedHandler = async (params) => {
+      const blocked = checkRateLimit(name, params);
+      if (blocked) {
+        return { content: [{ type: 'text', text: `⛔ ${blocked}` }] };
+      }
+      return originalHandler(params);
+    };
+    args.push(wrappedHandler);
+    server.tool(name, ...args);
+  };
+  const _server = { tool: registerTool, resource: (...args) => server.resource(...args) };
+  _registerAllTools(_server);
+}
+
+function _registerAllTools(server) {
 
   // ── ONBOARDING ──────────────────────────────────────────────────────
   server.tool(
     'onboarding',
-    `🚀 LLAMA ESTO PRIMERO. Te asigna un rol automáticamente en el debate activo.
-Recibirás: tu rol, qué hacer, qué tools usar, estado actual del debate.
-Solo necesitas dar tu nombre — el sistema hace el resto.
-Si no hay debate activo, te dice cómo crear uno.`,
+    `Assigns you a role in the active debate. Returns your role, instructions, and debate state. Call this first.`,
     {
       agent_name: z.string().describe('Tu nombre único (ej: "claude-opus-1", "gemini-pro", "gpt4-review")'),
     },
@@ -115,153 +179,23 @@ Si no hay debate activo, te dice cómo crear uno.`,
       if (result.phase_instruction) {
         lines.push(``, `📌 Instrucción de fase: ${result.phase_instruction}`);
       }
-      lines.push(``, `🔄 IMPORTANTE: Usa "run_debate" para lanzar un debate autónomo completo en el servidor, o usa "decir" para participar manualmente en el debate.`);
       return { content: [{ type: 'text', text: lines.join('\n') }] };
-    }
-  );
-
-  // ── RUN_DEBATE (orquestación autónoma) ─────────────────────────────
-  server.tool(
-    'run_debate',
-    `🚀 EJECUTA UN DEBATE AUTÓNOMO COMPLETO en el servidor.
-Una sola llamada ejecuta TODO el debate: crea agentes, genera mensajes via OpenAI API, avanza rondas, y genera síntesis.
-NO requiere que los agentes llamen tools repetidamente — el servidor hace todo.
-
-Ideal para: debates largos, análisis profundos, mejora de código.
-El debate corre en background y puedes ver el progreso en /dashboard-v2 o /api/orchestrator/events.`,
-    {
-      situacion: z.enum(['libre', 'identificar_problemas', 'arquitectura', 'ejecucion', 'mejora_codigo']).default('libre').describe('Tipo de situación/workflow'),
-      tema: z.string().describe('El tema a debatir'),
-      num_agents: z.number().optional().default(4).describe('Número de agentes (2-15)'),
-      max_rounds: z.number().optional().default(10).describe('Máximo de rondas (0=auto-detect by repetition)'),
-      model: z.string().optional().default('gpt-4o-mini').describe('Modelo OpenAI a usar'),
-    },
-    async ({ situacion, tema, num_agents, max_rounds, model }) => {
-      const debateId = `orch-${Date.now()}`;
-      const startTime = Date.now();
-
-      activeOrchestrations.set(debateId, {
-        id: debateId,
-        status: 'running',
-        tema,
-        situacion,
-        startTime,
-        messages: [],
-      });
-
-      broadcastOrchEvent({
-        type: 'debate_started',
-        timestamp: new Date().toISOString(),
-        data: { debateId, tema, situacion, num_agents, max_rounds, model },
-      });
-
-      try {
-        const config = {
-          debateId,
-          situacion,
-          tema,
-          numAgents: num_agents,
-          maxRounds: max_rounds,
-          model,
-          onMessage: (msg) => {
-            const orch = activeOrchestrations.get(debateId);
-            if (orch) orch.messages.push(msg);
-            broadcastOrchEvent({
-              type: 'message',
-              timestamp: new Date().toISOString(),
-              data: { debateId, ...msg },
-            });
-          },
-        };
-
-        const result = await orchestrator.runDebate(config);
-
-        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-        const orch = activeOrchestrations.get(debateId);
-        if (orch) orch.status = 'completed';
-
-        broadcastOrchEvent({
-          type: 'debate_completed',
-          timestamp: new Date().toISOString(),
-          data: { debateId, duration, totalMessages: result.totalMessages, rounds: result.rounds },
-        });
-
-        const synthesisPreview = result.synthesis
-          ? result.synthesis.substring(0, 300) + (result.synthesis.length > 300 ? '...' : '')
-          : '(sin síntesis)';
-
-        return {
-          content: [{
-            type: 'text',
-            text: `🏁 DEBATE AUTÓNOMO COMPLETADO
-
-Debate ID: ${debateId}
-Tema: "${tema}"
-Situación: ${situacion}
-Modelo: ${model}
-Agentes: ${num_agents}
-Rondas completadas: ${result.rounds || 'N/A'}
-Total mensajes: ${result.totalMessages || 0}
-Duración: ${duration}s
-
-📝 SÍNTESIS:
-${synthesisPreview}
-
-Ver detalles completos en /dashboard-v2 o /api/orchestrator/events`,
-          }],
-        };
-      } catch (err) {
-        const orch = activeOrchestrations.get(debateId);
-        if (orch) orch.status = 'error';
-
-        broadcastOrchEvent({
-          type: 'debate_error',
-          timestamp: new Date().toISOString(),
-          data: { debateId, error: err.message },
-        });
-
-        return {
-          content: [{
-            type: 'text',
-            text: `❌ Error en debate autónomo: ${err.message}\nDebate ID: ${debateId}`,
-          }],
-        };
-      }
     }
   );
 
   // ── EVALUAR_TAREA (triage inteligente) ──────────────────────────────
   server.tool(
     'evaluar_tarea',
-    `🧠 TRIAGE INTELIGENTE — Describe qué necesitas hacer y el sistema decide el mejor approach.
-
-SIMPLE → Te da instrucciones directas (1 agente lo resuelve)
-MEDIO → Consulta rápida entre 2-3 agentes especializados (3 rondas)
-COMPLEJO → Debate completo autónomo con 4-6 agentes (10 rondas)
-
-EQUIPO DE 6 AGENTES:
-🏗️ Arquitecto — diseño de sistemas, patterns, decisiones técnicas
-⚛️ Frontend Dev — React, TypeScript, UI/UX, Tailwind
-🔧 Backend Dev — Supabase, Edge Functions, API, database
-🧪 QA Engineer — tests, edge cases, validación
-🔒 Security Analyst — auth, XSS, injection, OWASP
-🧠 Triage Coordinator — evalúa complejidad, coordina
-
-El sistema automáticamente:
-1. Clasifica la complejidad de tu tarea
-2. Selecciona los agentes relevantes
-3. Si es complejo, abre debate autónomo
-4. Te retorna el plan de acción o resultado del debate`,
+    `Evaluate task complexity (simple/medium/complex) and recommend which agents should handle it.`,
     {
       descripcion: z.string().describe('Descripción de la tarea que necesitas hacer (cuanto más detalle, mejor la clasificación)'),
       forzar_debate: z.boolean().optional().default(false).describe('Forzar debate grupal aunque la tarea sea simple'),
-      model: z.string().optional().default('gpt-4o-mini').describe('Modelo OpenAI para la evaluación'),
     },
-    async ({ descripcion, forzar_debate, model }) => {
+    async ({ descripcion, forzar_debate }) => {
       try {
         if (forzar_debate) {
           // Force full debate
-          const result = await triage.runTriagedTask(descripcion, { forceDebate: true, model });
+          const result = await triage.runTriagedTask(descripcion, { forceDebate: true });
           const synth = result.result?.synthesis
             ? result.result.synthesis.substring(0, 800) + (result.result.synthesis.length > 800 ? '...' : '')
             : '(sin síntesis)';
@@ -276,7 +210,7 @@ Duración: ${((result.result?.duration || 0) / 1000).toFixed(1)}s
 ${synth}` }] };
         }
 
-        const result = await triage.runTriagedTask(descripcion, { model });
+        const result = await triage.runTriagedTask(descripcion, {});
 
         // Format based on decision type
         if (result.decision.action === 'direct') {
@@ -335,8 +269,7 @@ Razón del triage: ${result.decision.reason}` }] };
   // ── EQUIPO (muestra agentes) ──────────────────────────────────────────
   server.tool(
     'equipo',
-    `👥 Muestra el equipo de 6 agentes especializados y sus capacidades.
-Útil para saber quién puede ayudar con qué.`,
+    `Show the 6-agent team: roles, specialties, and current competence scores.`,
     {},
     async () => {
       const team = triage.TEAM_AGENTS;
@@ -481,22 +414,43 @@ ${rulesText}
   // ── DECIR (con enforcement de profundidad) ─────────────────────────
   server.tool(
     'decir',
-    `Di algo en el debate. REGLAS ESTRICTAS:
-
-1. MÍNIMO 150 PALABRAS o el mensaje es RECHAZADO automáticamente por el servidor
-2. En modo ADVERSARIAL cada agente debe hablar 2 VECES por ronda (posición + réplica) antes de avanzar
-3. DEBE incluir al menos 1 objeción directa a otro participante POR NOMBRE
-4. DEBE argumentar desde tu ROL — no seas neutral
-5. Si te mencionaron, DEBES responder a la objeción
-
-Si tu mensaje es rechazado por ser muy corto, reescríbelo con más detalle y evidencia.`,
+    `Send a message in the debate as your assigned agent. Minimum 50-100 words depending on intensity.`,
     {
       debate_id: z.string().describe('ID del debate'),
       nombre: z.string().describe('Tu nombre de participante'),
       mensaje: z.string().describe('Tu contribución DETALLADA. Mínimo 150 palabras. Incluye argumentos concretos, evidencia, y objeciones directas.'),
+      channel: z.string().optional().describe('Canal donde postear: main (default), code-review, security, architecture, implementation'),
+      thread_id: z.string().optional().describe('Thread ID para responder en un hilo (formato: thread-xxx)'),
+      reply_to: z.number().optional().describe('Índice del mensaje al que respondes'),
+      priority: z.enum(['P0', 'P1', 'P2']).optional().describe('Prioridad: P0=crítico, P1=importante, P2=normal (default)'),
     },
-    async ({ debate_id, nombre, mensaje }) => {
+    async ({ debate_id, nombre, mensaje, channel, thread_id, reply_to, priority }) => {
+      // Check channel access if specified
+      if (channel && channel !== 'main') {
+        // Smart routing: use findDebateForAgent if available
+      const validators = require('./validators.cjs');
+      let debate;
+      if (validators.findDebateForAgent) {
+        const routing = validators.findDebateForAgent(agentName);
+        debate = routing.success ? routing.data : dm.getActiveDebate();
+      } else {
+        debate = dm.getActiveDebate();
+      }
+        const participant = debate?.participants?.find(p => p.name === nombre);
+        const check = parallel.canPostToChannel(debate_id, participant?.role, channel);
+        if (!check.allowed) {
+          return { content: [{ type: 'text', text: `🚫 ${check.reason}` }] };
+        }
+      }
+
       const result = dm.say(debate_id, nombre, mensaje);
+
+      // Enhance message with parallel metadata if successful
+      if (!result.error && result.message) {
+        parallel.enhanceMessage(debate_id, result.message, { channel, thread_id, reply_to, priority });
+        dm.saveStateNow(); // persist channel/thread metadata
+        parallel.releaseSlot(debate_id, nombre);
+      }
       if (result.error) {
         // Si fue rechazado por minWords, dar instrucciones claras
         if (result.rejected) {
@@ -547,17 +501,130 @@ Si tu mensaje es rechazado por ser muy corto, reescríbelo con más detalle y ev
     }
   );
 
+  // ── MI_TURNO (loop signal for Figma Make agents) ────────────────
+  server.tool(
+    'mi_turno',
+    `Check if it's your turn to speak. Returns action: "speak" (your turn — respond now), "wait" (not your turn — call again in a few seconds), or "done" (debate finished — stop your loop). Designed for Figma Make agent loops.`,
+    {
+      agent_name: z.string().describe('Tu nombre de agente (el mismo que usaste en onboarding)'),
+    },
+    async ({ agent_name }) => {
+      try {
+        const debate = dm.getActiveDebate();
+
+        // No active debate → done
+        if (!debate) {
+          return { content: [{ type: 'text', text: JSON.stringify({ action: 'done', reason: 'No hay debate activo.' }) }] };
+        }
+
+        // Debate finished → done
+        if (debate.status === 'finished') {
+          return { content: [{ type: 'text', text: JSON.stringify({ action: 'done', reason: 'Debate terminado.', debate_id: debate.id }) }] };
+        }
+
+        // Check if this agent is a participant
+        const participants = debate.participants || [];
+        const participant = participants.find(p =>
+          p.name === agent_name || (p.name && p.name.toLowerCase() === agent_name.toLowerCase())
+        );
+        if (!participant) {
+          return { content: [{ type: 'text', text: JSON.stringify({ action: 'done', reason: `No eres participante del debate ${debate.id}. Llama onboarding primero.` }) }] };
+        }
+
+        // PARALLEL MODE: all agents can speak simultaneously
+        const parallelResult = parallel.getParallelTurnForAgent(debate, participant.name);
+
+        if (!parallelResult.canSpeak) {
+          // Check if round is complete
+          const spokenSet = new Set(debate.spokenThisRound || []);
+          const pending = participants.filter(p => !spokenSet.has(p.name)).map(p => p.name);
+
+          if (pending.length === 0) {
+            return { content: [{ type: 'text', text: JSON.stringify({ action: 'wait', reason: 'Ronda completa, esperando avance automático.', round: debate.currentRound }) }] };
+          }
+
+          return { content: [{ type: 'text', text: JSON.stringify({ action: 'wait', reason: parallelResult.reason, round: debate.currentRound, active_speakers: parallelResult.parallelInfo?.activeSpeakers || [] }) }] };
+        }
+
+        // It's my turn — provide context (parallel: multiple agents get "speak" simultaneously)
+        let phaseName = null;
+        let phaseInstruction = null;
+        try {
+          const phase = dm.getCurrentPhase(debate.currentRound, debate.phases);
+          if (phase) { phaseName = phase.name; phaseInstruction = phase.instruction; }
+        } catch (_) {}
+
+        const turnData = parallelResult.turnData;
+        const pInfo = parallelResult.parallelInfo;
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              action: 'speak',
+              debate_id: debate.id,
+              agent_name: participant.name,
+              role: participant.role,
+              round: debate.currentRound,
+              max_rounds: debate.maxRounds,
+              phase: phaseName,
+              phase_instruction: phaseInstruction,
+              topic: debate.topic,
+              recent_messages: turnData.relevantMessages,
+              parallel: {
+                active_speakers: pInfo.activeSpeakers,
+                concurrent: pInfo.concurrent,
+                channels: pInfo.channels?.map(c => ({ id: c.id, msgs: c.messageCount })),
+              },
+              instruction: `Es tu turno (PARALELO — ${pInfo.concurrent} agentes hablando). Responde usando: decir(debate_id: "${debate.id}", nombre: "${participant.name}", mensaje: "..."). Puedes usar channel:"code-review" o thread_id:"thread-xxx" para hilos. Mínimo 150 palabras.`,
+            }),
+          }],
+        };
+      } catch (err) {
+        console.error(`[mi_turno] ERROR for ${agent_name}: ${err.message}`);
+        return { content: [{ type: 'text', text: JSON.stringify({ action: 'wait', reason: `Error interno: ${err.message}. Intenta de nuevo.` }) }] };
+      }
+    }
+  );
+
   // ── LEER ──────────────────────────────────────────────────────────
   server.tool(
     'leer',
-    'Lee el historial del debate con roles, fases, reglas y estado de turnos. Usa esto para ver qué dijeron los demás antes de responder. Soporta paginación para debates largos.',
+    'Read debate history. Returns last 20 messages by default. Filter by channel or thread_id for parallel conversations.',
     {
       debate_id: z.string().describe('ID del debate'),
       desde_mensaje: z.number().optional().default(0).describe('Índice desde el cual leer (0 = todo)'),
       limite: z.number().optional().default(0).describe('Máximo de mensajes a retornar (0 = todos). Retorna los últimos N mensajes.'),
+      channel: z.string().optional().describe('Filtrar por canal: main, code-review, security, architecture, implementation, all'),
+      thread_id: z.string().optional().describe('Filtrar por thread ID'),
     },
-    async ({ debate_id, desde_mensaje, limite }) => {
-      const result = dm.read(debate_id, desde_mensaje, limite);
+    async ({ debate_id, desde_mensaje, limite, channel, thread_id }) => {
+      const effectiveLimit = limite || 20;
+      const result = dm.read(debate_id, desde_mensaje || 0, effectiveLimit);
+
+      // Apply parallel filters if specified
+      if (!result.error && result.messages && (channel || thread_id)) {
+        let filtered = result.messages;
+        if (channel) filtered = parallel.filterByChannel(filtered, channel);
+        if (thread_id) filtered = parallel.filterByThread(filtered, thread_id);
+        result.messages = filtered;
+        result.newMessages = filtered.length;
+        // Rebuild formatted output
+        let formatted = '';
+        let currentRound = 0;
+        for (const msg of filtered) {
+          if (msg.round > currentRound) {
+            formatted += `\n═══ RONDA ${msg.round} ═══\n\n`;
+            currentRound = msg.round;
+          }
+          const time = new Date(msg.timestamp).toLocaleTimeString();
+          const roleTag = msg.participantRole ? ` [${msg.participantRole}]` : '';
+          const chTag = msg.channel && msg.channel !== 'main' ? ` #${msg.channel}` : '';
+          const thTag = msg.thread_id ? ` 🧵${msg.thread_id}` : '';
+          formatted += `[${time}] **${msg.participantName}**${roleTag}${chTag}${thTag}:\n${msg.text}\n\n---\n\n`;
+        }
+        result.formatted = formatted;
+      }
       if (result.error) {
         return { content: [{ type: 'text', text: `Error: ${result.error}` }] };
       }
@@ -570,7 +637,107 @@ Si tu mensaje es rechazado por ser muy corto, reescríbelo con más detalle y ev
         extra += `\n\n📌 INSTRUCCIÓN DE FASE: ${result.phaseInstruction}`;
       }
 
-      return { content: [{ type: 'text', text: result.formatted + extra }] };
+      let paginationHint = '';
+      if (result.totalAvailable > effectiveLimit) {
+        paginationHint = `\n\n📄 Mostrando últimos ${effectiveLimit} de ${result.totalAvailable} mensajes. Usa limite=${result.totalAvailable} para ver todos, o desde_mensaje=${(desde_mensaje || 0) + effectiveLimit} para la siguiente página.`;
+      }
+
+      return { content: [{ type: 'text', text: result.formatted + extra + paginationHint }] };
+    }
+  );
+
+  // ── DIGEST (parallel channels & threads summary) ─────────────────
+  server.tool(
+    'digest',
+    'Get a summary of all active parallel channels, threads, and speakers. Use this to see what conversations are happening.',
+    {
+      debate_id: z.string().describe('ID del debate'),
+    },
+    async ({ debate_id }) => {
+      const debate = dm.getActiveDebate();
+      if (!debate || debate.id !== debate_id) {
+        return { content: [{ type: 'text', text: `Error: Debate ${debate_id} no encontrado o no activo.` }] };
+      }
+      const digestText = parallel.generateDigest(debate_id, debate.messages || []);
+      const config = parallel.getParallelConfig(debate_id);
+      const footer = `\n\n⚙️ Parallel: ${config.activeSpeakers.length} speakers active | ${config.channelCount} channels | ${config.activeThreads} active threads`;
+      return { content: [{ type: 'text', text: digestText + footer }] };
+    }
+  );
+
+  // ── CREAR CANAL (custom channels for focused discussion) ──────────
+  server.tool(
+    'crear_canal',
+    'Create a custom channel for focused discussion. Returns channel info.',
+    {
+      debate_id: z.string().describe('ID del debate'),
+      channel_id: z.string().describe('ID del canal (ej: "proposal-review", "testing")'),
+      topic: z.string().describe('Descripción del canal'),
+      allowed_roles: z.array(z.string()).optional().describe('Roles permitidos (vacío = abierto a todos)'),
+    },
+    async ({ debate_id, channel_id, topic, allowed_roles }) => {
+      const result = parallel.createChannel(debate_id, channel_id, topic, allowed_roles || null);
+      if (result.error) {
+        return { content: [{ type: 'text', text: `❌ ${result.error}` }] };
+      }
+      return { content: [{ type: 'text', text: `✅ Canal #${channel_id} creado: ${topic}` }] };
+    }
+  );
+
+  // ── LISTAR CANALES (list all channels in debate) ────────────────
+  server.tool(
+    'listar_canales',
+    'List all channels in a debate with message counts and activity.',
+    {
+      debate_id: z.string().describe('ID del debate'),
+    },
+    async ({ debate_id }) => {
+      const debate = dm.listDebates().find(d => d.id === debate_id);
+      if (!debate) {
+        return { content: [{ type: 'text', text: `❌ Debate ${debate_id} not found` }] };
+      }
+      const readResult = dm.read(debate_id);
+      const messages = readResult.messages || [];
+      const channels = parallel.listChannels(debate_id, messages);
+      const lines = channels.map(c => {
+        const restricted = c.restricted ? ` [${c.allowedRoles.join(', ')}]` : ' [open]';
+        return `#${c.id} — ${c.topic}${restricted} (${c.messageCount} msgs)`;
+      });
+      return { content: [{ type: 'text', text: `📡 Canales:\n${lines.join('\n')}` }] };
+    }
+  );
+
+  // ── PARALLEL CONFIG (view/update parallel settings) ───────────────
+  server.tool(
+    'parallel_config',
+    'View or update parallel debate configuration (max concurrent speakers, channels, threading).',
+    {
+      debate_id: z.string().describe('ID del debate'),
+      max_concurrent: z.number().optional().describe('Max concurrent speakers (0 = unlimited)'),
+      channels_enabled: z.boolean().optional().describe('Enable/disable channels'),
+      threading_enabled: z.boolean().optional().describe('Enable/disable threading'),
+    },
+    async ({ debate_id, max_concurrent, channels_enabled, threading_enabled }) => {
+      // Update config if any params provided
+      const updates = {};
+      if (max_concurrent !== undefined) updates.maxConcurrent = max_concurrent;
+      if (channels_enabled !== undefined) updates.channelsEnabled = channels_enabled;
+      if (threading_enabled !== undefined) updates.threadingEnabled = threading_enabled;
+
+      if (Object.keys(updates).length > 0) {
+        parallel.setParallelConfig(debate_id, updates);
+      }
+
+      const config = parallel.getParallelConfig(debate_id);
+      const lines = [
+        `⚙️ Parallel Config for ${debate_id}:`,
+        `  Enabled: ${config.enabled}`,
+        `  Max Concurrent: ${config.maxConcurrent || 'unlimited'}`,
+        `  Channels: ${config.channelsEnabled ? 'ON' : 'OFF'} (${config.channelCount} total)`,
+        `  Threading: ${config.threadingEnabled ? 'ON' : 'OFF'} (${config.activeThreads} active)`,
+        `  Active Speakers: ${config.activeSpeakers.length ? config.activeSpeakers.join(', ') : 'none'}`,
+      ];
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
     }
   );
 
@@ -606,9 +773,7 @@ Si tu mensaje es rechazado por ser muy corto, reescríbelo con más detalle y ev
   // ── VOTAR FINALIZAR ──────────────────────────────────────────────
   server.tool(
     'votar_finalizar',
-    `🗳️ Vota para finalizar el debate. Se necesita CONSENSO de 2/3 de los participantes.
-Cuando estés satisfecho con los cambios realizados, vota para terminar.
-Cuando se alcance el consenso, el coordinador-merge puede llamar "finalizar".`,
+    `Vote to end the debate. Needs 2/3 majority to finalize.`,
     {
       debate_id: z.string().describe('ID del debate'),
       nombre: z.string().describe('Tu nombre de agente'),
@@ -624,8 +789,7 @@ Cuando se alcance el consenso, el coordinador-merge puede llamar "finalizar".`,
   // ── FINALIZAR ─────────────────────────────────────────────────────
   server.tool(
     'finalizar',
-    `🏁 Cierra el debate con síntesis. REQUIERE consenso previo: 2/3 de los agentes deben haber votado con "votar_finalizar".
-Si no hay consenso suficiente, será rechazado.`,
+    `End the debate and generate synthesis. Requires consensus votes unless bypassed.`,
     {
       debate_id: z.string().describe('ID del debate'),
       sintesis: z.string().optional().describe('Síntesis final del debate'),
@@ -636,6 +800,29 @@ Si no hay consenso suficiente, será rechazado.`,
         const extra = result.voters ? `\nVotos actuales: ${result.voters.join(', ')}` : '';
         return { content: [{ type: 'text', text: `❌ ${result.error}${extra}` }] };
       }
+
+      // Record outcome for self-improvement
+      try {
+        const outcomes = require('./debate-outcomes.cjs');
+        const finishedDebate = dm.listDebates().find(d => d.id === debate_id);
+        if (finishedDebate) {
+          const readResult = dm.read(debate_id);
+          outcomes.recordOutcome({
+            debateId: debate_id,
+            topic: finishedDebate.topic || '',
+            messages: readResult.messages || [],
+            rounds: finishedDebate.currentRound || 0,
+            maxRounds: finishedDebate.maxRounds || 10,
+            duration: finishedDebate.startedAt ? Date.now() - new Date(finishedDebate.startedAt).getTime() : 0,
+            agents: (finishedDebate.participants || []).map(p => ({ name: p.name, role: p.role })),
+            synthesis: typeof result === 'object' && result.synthesis ? result.synthesis : '',
+          });
+        }
+      } catch (err) {
+        // debate-outcomes recording is best-effort
+        console.warn('[finalizar] Outcome recording failed:', err.message);
+      }
+
       const parts = result.debate.participants.map(p => `${p.name} (${p.role})`).join(', ');
       return {
         content: [{
@@ -646,10 +833,37 @@ Si no hay consenso suficiente, será rechazado.`,
     }
   );
 
+  // ── DEBATE OUTCOMES (rate_debate is below with SM-2 integration) ──
+  server.tool(
+    'outcome_stats',
+    'Get aggregate statistics across all debate outcomes. Shows ratings, efficiency, and trends.',
+    {},
+    async () => {
+      try {
+        const outcomes = require('./debate-outcomes.cjs');
+        outcomes.applyAutoRatings();
+        const stats = outcomes.getOutcomeStats();
+        const lines = [
+          `📊 Debate Outcome Stats:`,
+          `  Total Debates: ${stats.totalDebates}`,
+          `  Reviewed: ${stats.reviewed} | Pending: ${stats.pendingReview}`,
+          `  Avg Rating: ${stats.avgRating || 'N/A'}`,
+          `  Avg Efficiency: ${stats.avgEfficiency || 'N/A'}`,
+          `  Avg Duration: ${stats.avgDurationMs ? Math.round(stats.avgDurationMs / 1000) + 's' : 'N/A'}`,
+          `  Avg Messages: ${stats.avgMessages || 'N/A'}`,
+          `  Repetition Rate: ${stats.repetitionRate || 'N/A'}`,
+        ];
+        return { content: [{ type: 'text', text: lines.join('\n') }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: `❌ Error: ${err.message}` }] };
+      }
+    }
+  );
+
   // ── DEBATES ───────────────────────────────────────────────────────
   server.tool(
     'debates',
-    'Lista todos los debates con estado, categoría, intensidad y fases.',
+    'List all debates with their status, participants, and message counts.',
     {},
     async () => {
       const list = dm.listDebates();
@@ -671,7 +885,7 @@ Si no hay consenso suficiente, será rechazado.`,
   // ── ESTADO ────────────────────────────────────────────────────────
   server.tool(
     'estado',
-    'Estado detallado: participantes, roles, turnos, fase actual, reglas de engagement.',
+    'Get current debate status: topic, round, phase, participants, and who still needs to speak.',
     {},
     async () => {
       const debate = dm.getActiveDebate();
@@ -1323,22 +1537,44 @@ Usa esto para saber QUÉ hacer a continuación en una situación padronizada.`,
 
   server.tool(
     'read_project_file',
-    `📄 Lee un archivo del proyecto para analizar su código.
-Retorna el contenido con números de línea. Solo puede leer archivos dentro del directorio del proyecto.
+    `📄 Lee un archivo del proyecto con números de línea.
+Soporta paginación: usa offset y limit para leer secciones específicas de archivos grandes.
+Sin offset/limit devuelve el archivo completo.
 Úsalo ANTES de proponer cambios — necesitas ver el código actual.`,
     {
       path: z.string().describe('Ruta relativa al archivo (ej: "debate-manager.cjs", "mcp-server.js")'),
+      offset: z.number().optional().describe('Línea inicial (1-based). Default: 1'),
+      limit: z.number().optional().describe('Cantidad de líneas a leer. Default: archivo completo. Usa 200 para archivos grandes.'),
     },
-    async ({ path: filePath }) => {
-      const result = dm.readProjectFile(filePath);
+    async ({ path: filePath, offset, limit }) => {
+      const result = dm.readProjectFile(filePath, offset, limit);
       if (result.error) return { content: [{ type: 'text', text: `❌ ${result.error}` }] };
-      return { content: [{ type: 'text', text: `📄 ${result.path} (${result.lines} lines)\n\n${result.content}` }] };
+      const pag = result.truncated ? `\n📖 Mostrando líneas ${result.showing.from}-${result.showing.to} de ${result.showing.total} | Usa offset/limit para navegar` : '';
+      return { content: [{ type: 'text', text: `📄 ${result.path} (${result.lines} lines)${pag}\n\n${result.content}` }] };
+    }
+  );
+
+  server.tool(
+    'grep_project',
+    `🔍 Busca un patrón (regex o texto) en todos los archivos del proyecto.
+Retorna hasta 50 resultados con archivo, línea, y snippet con contexto.
+Ideal para encontrar funciones, variables, imports, o cualquier texto en el código.`,
+    {
+      pattern: z.string().describe('Texto o regex a buscar (ej: "function myFunc", "TODO", "import.*express")'),
+      file_filter: z.string().optional().describe('Filtrar por nombre/extensión (ej: ".cjs", "server", "test")'),
+      context_lines: z.number().optional().describe('Líneas de contexto antes/después del match. Default: 2'),
+    },
+    async ({ pattern, file_filter, context_lines }) => {
+      const result = dm.grepProject(pattern, file_filter || '', context_lines ?? 2);
+      if (result.matches === 0) return { content: [{ type: 'text', text: `🔍 No matches for "${pattern}"` }] };
+      const text = result.results.map(r => `── ${r.file}:${r.line} ──\n${r.snippet}`).join('\n\n');
+      return { content: [{ type: 'text', text: `🔍 ${result.matches} match(es) for "${pattern}":\n\n${text}` }] };
     }
   );
 
   server.tool(
     'list_project_files',
-    `📁 Lista archivos del proyecto. Puede filtrar por patrón (ej: ".cjs", ".js", "test").
+    `📁 Lista archivos del proyecto con tamaño y fecha. Puede filtrar por patrón (ej: ".cjs", ".js", "test").
 Excluye node_modules, .git, y directorios de sesiones.`,
     {
       pattern: z.string().optional().default('').describe('Filtro opcional: extensión o nombre parcial (ej: ".cjs", "server", "test")'),
@@ -1403,10 +1639,24 @@ Si falla, la propuesta se marca como rechazada.`,
       agent_name: z.string().describe('Nombre del agente que ejecuta la aplicacion (debe ser coordinador-merge)'),
     },
     async ({ proposal_id, agent_name }) => {
-      const result = dm.applyProposal(proposal_id, agent_name);
+      const result = await dm.applyProposal(proposal_id, agent_name);
       if (result.error) return { content: [{ type: 'text', text: `❌ ${result.error}` }] };
-      const branchInfo = result.branch ? `\nBranch: ${result.branch}` : '\n(Sin git branch — aplicado directamente)';
-      return { content: [{ type: 'text', text: `🚀 Propuesta ${result.id} APLICADA\nArchivo: ${result.file}${branchInfo}\nAplicado por: ${result.appliedBy}\n\n⚠️ Ejecuta run_tests para verificar que nada se rompió.` }] };
+
+      // Auto-test after apply
+      const testResult = dm.runProjectTests();
+      if (!testResult.allPassed) {
+        // Tests failed → auto-revert
+        dm.revertProposal(proposal_id);
+        return { content: [{ type: 'text', text: `❌ Propuesta ${result.id} REVERTIDA — tests fallaron:\n${testResult.output || testResult.error}\n\nEl archivo ${result.file} volvió a su estado anterior.` }] };
+      }
+
+      // Tests passed → auto git commit + push
+      const gitResult = dm.gitSync({ id: result.id, filePath: result.file, reason: result.reason || 'proposal applied', debateId: result.debateId || 'unknown', appliedBy: result.appliedBy });
+      const syncInfo = gitResult.synced
+        ? `\n🔄 Git sync: committed + pushed → ${gitResult.branch} (${gitResult.commit})`
+        : `\n⚠️ Git sync failed: ${gitResult.error}`;
+
+      return { content: [{ type: 'text', text: `🚀 Propuesta ${result.id} APLICADA\nArchivo: ${result.file}\nAplicado por: ${result.appliedBy}\n✅ Tests: ${testResult.passed} passed, ${testResult.failed} failed${syncInfo}` }] };
     }
   );
 
@@ -1438,6 +1688,107 @@ Muestra: id, archivo, estado, razón, cantidad de reviews.`,
         `${p.status === 'approved' ? '✅' : p.status === 'rejected' ? '❌' : p.status === 'applied' ? '🚀' : '⏳'} ${p.id} | ${p.filePath} | ${p.status} | ${p.approvals}👍 ${p.rejections}👎 | ${p.reason.substring(0, 60)}`
       ).join('\n');
       return { content: [{ type: 'text', text: `📋 ${props.length} propuesta(s):\n${text}` }] };
+    }
+  );
+
+  server.tool(
+    'git_pull',
+    `🔄 Hace git pull --rebase para sincronizar el repo local con el remoto.
+Úsalo antes de proponer cambios para asegurar que trabajas con la última versión del código.`,
+    {},
+    async () => {
+      const result = dm.gitPull();
+      if (result.success) {
+        return { content: [{ type: 'text', text: `🔄 Git pull exitoso:\n${result.output}` }] };
+      }
+      return { content: [{ type: 'text', text: `❌ Git pull falló: ${result.error}` }] };
+    }
+  );
+
+  // ── DIRECT EDIT/WRITE (bypass governance) ──
+
+  server.tool(
+    'direct_edit',
+    `✏️ Edita un archivo directamente (como Claude Code). Reemplaza old_string por new_string.
+SIN governance — el cambio se aplica inmediatamente.
+Auto-test: si los tests fallan, el cambio se revierte automáticamente.
+Auto-sync: si los tests pasan, hace git commit + push.
+IMPORTANTE: Lee el archivo primero con read_project_file para obtener el contenido exacto.`,
+    {
+      file_path: z.string().describe('Ruta relativa del archivo a editar'),
+      old_string: z.string().describe('Texto exacto a reemplazar (debe ser único en el archivo)'),
+      new_string: z.string().describe('Texto nuevo que reemplaza old_string'),
+      reason: z.string().describe('Razón del cambio (se usa en el commit message)'),
+      agent_name: z.string().describe('Nombre del agente que hace el cambio'),
+    },
+    async ({ file_path, old_string, new_string, reason, agent_name }) => {
+      const result = await dm.directEdit(file_path, old_string, new_string, reason, agent_name);
+      if (result.error) return { content: [{ type: 'text', text: `❌ ${result.error}` }] };
+
+      // Auto-test
+      const testResult = dm.runProjectTests();
+      if (!testResult.allPassed) {
+        // Revert: swap back
+        await dm.directEdit(file_path, new_string, old_string, 'auto-revert: tests failed', 'system');
+        return { content: [{ type: 'text', text: `❌ REVERTIDO — tests fallaron después del cambio:\n${testResult.output || testResult.error}\n\nEl archivo ${file_path} volvió a su estado anterior.` }] };
+      }
+
+      // Auto git sync
+      const gitResult = dm.gitSync({ id: `direct-${Date.now()}`, filePath: file_path, reason, debateId: 'direct-edit', appliedBy: agent_name });
+      const syncInfo = gitResult.synced
+        ? `\n🔄 Git: ${gitResult.branch} (${gitResult.commit})`
+        : `\n⚠️ Git sync failed: ${gitResult.error}`;
+
+      return { content: [{ type: 'text', text: `✏️ Editado: ${file_path}\nPor: ${agent_name}\nRazón: ${reason}\n✅ Tests: ${testResult.passed} passed${syncInfo}` }] };
+    }
+  );
+
+  server.tool(
+    'direct_write',
+    `📝 Crea o sobrescribe un archivo completo (como Claude Code).
+SIN governance — el cambio se aplica inmediatamente.
+Auto-test: si los tests fallan, el archivo se elimina/revierte.
+Auto-sync: si los tests pasan, hace git commit + push.
+CUIDADO: Sobrescribe el archivo completo. Para cambios parciales usa direct_edit.`,
+    {
+      file_path: z.string().describe('Ruta relativa del archivo a crear/sobrescribir'),
+      content: z.string().describe('Contenido completo del archivo'),
+      reason: z.string().describe('Razón del cambio (se usa en el commit message)'),
+      agent_name: z.string().describe('Nombre del agente que hace el cambio'),
+    },
+    async ({ file_path, content, reason, agent_name }) => {
+      // Save backup if file exists
+      const fsPromises = require('fs').promises;
+      const resolved = require('path').resolve(__dirname, file_path);
+      let backup = null;
+      let existed = false;
+      try {
+        backup = await fsPromises.readFile(resolved, 'utf-8');
+        existed = true;
+      } catch (_) {}
+
+      const result = await dm.directWrite(file_path, content, reason, agent_name);
+      if (result.error) return { content: [{ type: 'text', text: `❌ ${result.error}` }] };
+
+      // Auto-test
+      const testResult = dm.runProjectTests();
+      if (!testResult.allPassed) {
+        // Revert
+        if (existed && backup !== null) {
+          await fsPromises.writeFile(resolved, backup, 'utf-8');
+        } else {
+          try { await fsPromises.unlink(resolved); } catch (_) {}
+        }
+        return { content: [{ type: 'text', text: `❌ REVERTIDO — tests fallaron:\n${testResult.output || testResult.error}\n\nEl archivo ${file_path} volvió a su estado anterior.` }] };
+      }
+
+      // Auto git sync
+      const gitResult = dm.gitSync({ id: `direct-${Date.now()}`, filePath: file_path, reason, debateId: 'direct-write', appliedBy: agent_name });
+      const syncInfo = gitResult.synced
+        ? `\n🔄 Git: ${gitResult.branch} (${gitResult.commit})`
+        : `\n⚠️ Git sync failed: ${gitResult.error}`;
+
+      return { content: [{ type: 'text', text: `📝 ${result.created ? 'Creado' : 'Sobrescrito'}: ${file_path}\nPor: ${agent_name}\nRazón: ${reason}\nLíneas: ${result.lines}\n✅ Tests: ${testResult.passed} passed${syncInfo}` }] };
     }
   );
 
@@ -1501,10 +1852,7 @@ Con proposal_id: retorna el estado detallado de qué falta para aprobar esa prop
   // ── EMBEDDINGS / SEMANTIC SEARCH ──
   server.tool(
     'buscar_similar',
-    `🔍 Búsqueda semántica en el historial de debates usando embeddings de OpenAI.
-Encuentra mensajes, contextos y síntesis similares a tu consulta.
-Útil para: "¿ya debatimos algo parecido?", encontrar decisiones previas, detectar contradicciones.
-Soporta filtros por debate, tipo de contenido, y agente.`,
+    `Search past debates and knowledge base by semantic similarity. Returns top matches.`,
     {
       query: z.string().describe('Texto de búsqueda semántica (ej: "microservicios vs monolito", "problema de autenticación")'),
       top_k: z.number().optional().describe('Cantidad de resultados (default: 5)'),
@@ -1560,9 +1908,7 @@ Muestra: total de embeddings, desglose por tipo y debate, última fecha de embed
   // ── HEALTH CHECK con validators ──
   server.tool(
     'health_check',
-    `🏥 Verifica la salud del estado del sistema.
-Revisa: integridad de debates.json, campos requeridos, datos corruptos.
-Retorna lista de problemas encontrados o estado saludable.`,
+    `System health check: state integrity, debate consistency, embedding stats.`,
     {},
     async () => {
       const health = validators.healthCheck();
@@ -1573,13 +1919,87 @@ Retorna lista de problemas encontrados o estado saludable.`,
       return { content: [{ type: 'text', text }] };
     }
   );
+
+  // ── RATE DEBATE con SM-2 ──
+  server.tool(
+    'rate_debate',
+    `Rate a finished debate 1-5. Updates agent competences and principle effectiveness via SM-2.`,
+    {
+      debate_id: { type: 'string', description: 'ID del debate a calificar' },
+      rating: { type: 'number', description: 'Calificación 1-5' },
+      feedback: { type: 'string', description: 'Comentario opcional sobre el debate' },
+    },
+    async ({ debate_id, rating, feedback }) => {
+      // Validate rating
+      if (!rating || rating < 1 || rating > 5) {
+        return { content: [{ type: 'text', text: '❌ Rating debe ser 1-5' }] };
+      }
+
+      // 1. Record rating in debate-outcomes
+      try {
+        const outcomes = require('./debate-outcomes.cjs');
+        const result = outcomes.rateDebate(debate_id, rating, feedback || '');
+        if (result.error) {
+          return { content: [{ type: 'text', text: `❌ ${result.error}` }] };
+        }
+      } catch (err) {
+        // debate-outcomes.cjs might not exist yet, continue with SM-2 update
+      }
+
+      // 2. Update SM-2 competences based on rating
+      // Map rating 1-5 to SM-2 quality 0-5:
+      // rating 1 → quality 0 (total reset)
+      // rating 2 → quality 2 (reset)
+      // rating 3 → quality 3 (minimum pass)
+      // rating 4 → quality 4 (good)
+      // rating 5 → quality 5 (excellent)
+      const sm2 = require('./sm2-lite.cjs');
+      const competences = sm2.loadCompetences();
+      const sm2Quality = { 1: 0, 2: 3, 3: 3, 4: 4, 5: 5 }[rating] || 3;
+
+      // Get debate data to know which agents participated
+      const dm = require('./debate-manager.cjs');
+      const debateData = dm.read(debate_id, 0, 0);
+
+      if (debateData.error) {
+        return { content: [{ type: 'text', text: `❌ Debate no encontrado: ${debate_id}` }] };
+      }
+
+      // Find participating agents from messages
+      const participants = new Set();
+      for (const msg of (debateData.messages || [])) {
+        if (msg.participantName) participants.add(msg.participantName);
+      }
+
+      // Update each participant's competence
+      const updates = [];
+      for (const agentName of participants) {
+        // Normalize agent name for competence lookup
+        const normalizedName = agentName.toLowerCase().replace(/^agente-/, '');
+        if (competences[normalizedName]) {
+          competences[normalizedName] = sm2.updateCompetence(competences[normalizedName], sm2Quality);
+          updates.push(`${normalizedName}: EF=${competences[normalizedName].easeFactor}, interval=${competences[normalizedName].interval}`);
+        }
+      }
+      sm2.saveCompetences(competences);
+
+      const text = [
+        `⭐ Debate ${debate_id} calificado: ${rating}/5`,
+        feedback ? `💬 Feedback: ${feedback}` : '',
+        `📊 SM-2 actualizado (quality=${sm2Quality}):`,
+        ...updates.map(u => `  • ${u}`),
+      ].filter(Boolean).join('\n');
+
+      return { content: [{ type: 'text', text }] };
+    }
+  );
 }
 
 // ── Mode: STDIO ──────────────────────────────────────────────────────────
 
 async function startStdio() {
   const server = new McpServer({ name: 'multi-agent-debate', version: '3.0.0' });
-  registerTools(server);
+  registerTools(server, 'all');
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
@@ -1744,6 +2164,38 @@ async function startHttp(port) {
         coordination: debate.coordination || null,
       },
     });
+  });
+
+  // ── API: Micro-round assignments (for dashboard world) ─────────────
+  app.get('/api/micro-assignments', (req, res) => {
+    try {
+      const microOrch = require('./micro-orchestrator.cjs');
+      const assignments = microOrch.getAgentMicroAssignments();
+      res.json({ assignments });
+    } catch {
+      res.json({ assignments: {} });
+    }
+  });
+
+  // ── API: Agent heartbeats (for dashboard) ────────────────────────
+  app.get('/api/heartbeats', (req, res) => {
+    try {
+      const { getAllHeartbeats } = require('./orchestrator-engine.cjs');
+      res.json({ heartbeats: getAllHeartbeats() });
+    } catch {
+      res.json({ heartbeats: {} });
+    }
+  });
+
+  // ── API: Micro-topics tree status ────────────────────────────────
+  app.get('/api/micro-topics', (req, res) => {
+    try {
+      const mt = require('./micro-topics.cjs');
+      const trees = mt.listTrees();
+      res.json({ trees });
+    } catch {
+      res.json({ trees: [] });
+    }
   });
 
   // ── Session Management API ─────────────────────────────────────────
@@ -2084,7 +2536,8 @@ poll();setInterval(poll,1500);
         messages: activeDebate.messages.length,
         round: `${activeDebate.currentRound}/${activeDebate.maxRounds || 'inf'}`,
       } : null,
-      tools: ['onboarding','evaluar_tarea','equipo','run_debate','iniciar_debate','unirse','decir','leer','avanzar_ronda','votar_finalizar','finalizar','debates','estado','roles','agregar_contexto','consultar_fuente','banco','turno','ronda_completa','decir_lote','situaciones','situacion','workflow_status','read_project_file','list_project_files','propose_edit','review_proposal','apply_proposal','revert_proposal','list_proposals','run_tests','governance_status','buscar_similar','embedding_stats','health_check'],
+      essentialTools: ['evaluar_tarea','equipo','onboarding','mi_turno','decir','leer','estado','debates','votar_finalizar','finalizar','buscar_similar','health_check','rate_debate','propose_edit','review_proposal','apply_proposal','direct_edit','direct_write','read_project_file','grep_project','git_pull','digest'],
+      internalTools: INTERNAL_TOOLS.size + ' tools (available via stdio mode)',
     });
   });
 
