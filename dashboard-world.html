@@ -1553,6 +1553,164 @@ function renderRoomLegend() {
 }
 
 // =====================================================================
+// MICRO-TOPIC TREE VISUALIZATION
+// =====================================================================
+let microTreeData = null; // Cached tree data from API
+let microTreeLastFetch = 0;
+
+function drawMicroTopicTree() {
+  // Group assignments by room for connection drawing
+  const roomGroups = {}; // { room: [{ agentName, subtopic, status }] }
+  const subtopicRooms = {}; // { subtopic: room }
+
+  for (const [agentName, ma] of Object.entries(microAssignments)) {
+    const room = ma.room || 'reason';
+    if (!roomGroups[room]) roomGroups[room] = [];
+    roomGroups[room].push({ agentName, subtopic: ma.subtopic, status: ma.status });
+    if (ma.subtopic) subtopicRooms[ma.subtopic] = room;
+  }
+
+  const t = Date.now() / 1000;
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+
+  // === CENTRAL HUB: Floating "brain" node above center ===
+  const hubRoom = ROOMS.debate;
+  const hubScreen = toScreen(hubRoom.x + hubRoom.w/2, hubRoom.y - 1);
+  const hubX = hubScreen.x;
+  const hubY = hubScreen.y - 60;
+
+  // Pulsing glow around hub
+  const pulse = (Math.sin(t * 2) + 1) / 2;
+  ctx.beginPath();
+  ctx.arc(hubX, hubY, 18 + pulse * 4, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(74, 222, 128, ${0.05 + pulse * 0.08})`;
+  ctx.fill();
+
+  // Hub circle
+  ctx.beginPath();
+  ctx.arc(hubX, hubY, 14, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(10, 25, 10, 0.9)';
+  ctx.fill();
+  ctx.strokeStyle = '#4ade80';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Hub icon
+  ctx.font = '10px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#4ade80';
+  ctx.fillText('\u{1F9E0}', hubX, hubY + 4);
+
+  // Hub label
+  ctx.font = 'bold 8px monospace';
+  ctx.fillStyle = '#4ade80cc';
+  ctx.fillText('MICRO-ROUND', hubX, hubY - 20);
+
+  // === CONNECTIONS: Lines from hub to each room with active micro-debates ===
+  const activeRooms = Object.keys(roomGroups);
+  for (let ri = 0; ri < activeRooms.length; ri++) {
+    const roomId = activeRooms[ri];
+    const room = ROOMS[roomId];
+    if (!room) continue;
+
+    const roomCenter = toScreen(room.x + room.w/2, room.y + room.h/2);
+    const targetX = roomCenter.x;
+    const targetY = roomCenter.y - room.h * 4;
+    const group = roomGroups[roomId];
+    const isActive = group.some(g => g.status === 'debating');
+    const isConcluded = group.every(g => g.status === 'concluded');
+
+    // Animated connection line
+    ctx.beginPath();
+    ctx.moveTo(hubX, hubY + 14);
+    // Bezier curve for organic look
+    const midX = (hubX + targetX) / 2;
+    const midY = (hubY + targetY) / 2 - 10;
+    ctx.quadraticCurveTo(midX, midY, targetX, targetY);
+
+    if (isActive) {
+      // Pulsing green line for active debates
+      const dashOffset = t * 30;
+      ctx.setLineDash([4, 4]);
+      ctx.lineDashOffset = -dashOffset;
+      ctx.strokeStyle = '#4ade80aa';
+      ctx.lineWidth = 1.5;
+    } else if (isConcluded) {
+      // Solid green for concluded
+      ctx.setLineDash([]);
+      ctx.strokeStyle = '#4ade8066';
+      ctx.lineWidth = 1;
+    } else {
+      ctx.setLineDash([2, 6]);
+      ctx.strokeStyle = '#4ade8033';
+      ctx.lineWidth = 0.5;
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Traveling dot along the line (data flowing)
+    if (isActive) {
+      const dotT = (t * 0.5 + ri * 0.3) % 1;
+      const dx = hubX + (targetX - hubX) * dotT;
+      const dy = hubY + 14 + (targetY - hubY - 14) * dotT - Math.sin(dotT * Math.PI) * 15;
+      ctx.beginPath();
+      ctx.arc(dx, dy, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#4ade80';
+      ctx.fill();
+    }
+
+    // === SUBTOPIC NODE at the room ===
+    const nodeX = targetX;
+    const nodeY = targetY;
+    const subtopic = group[0]?.subtopic || 'Micro-debate';
+    const shortTopic = subtopic.length > 30 ? subtopic.slice(0, 28) + '..' : subtopic;
+
+    // Node background (pixel-art stepped rect)
+    const nodePad = 4;
+    ctx.font = '7px monospace';
+    const ntw = ctx.measureText(shortTopic).width;
+    const nodeW = ntw + nodePad * 2 + 4;
+    const nodeH = 18;
+    const nx = nodeX - nodeW / 2;
+    const ny = nodeY - nodeH / 2;
+
+    // Stepped pixel border
+    ctx.fillStyle = isActive ? 'rgba(10,30,10,0.92)' : 'rgba(10,20,10,0.75)';
+    ctx.fillRect(nx + 2, ny, nodeW - 4, nodeH);
+    ctx.fillRect(nx, ny + 2, nodeW, nodeH - 4);
+    ctx.fillRect(nx + 1, ny + 1, nodeW - 2, nodeH - 2);
+
+    // Border
+    ctx.fillStyle = isActive ? '#4ade80' : isConcluded ? '#4ade8066' : '#4ade8033';
+    ctx.fillRect(nx + 2, ny - 1, nodeW - 4, 1);
+    ctx.fillRect(nx + 2, ny + nodeH, nodeW - 4, 1);
+    ctx.fillRect(nx - 1, ny + 2, 1, nodeH - 4);
+    ctx.fillRect(nx + nodeW, ny + 2, 1, nodeH - 4);
+
+    // Status icon
+    const statusIcon = isConcluded ? '\u2705' : isActive ? '\u{1F52C}' : '\u23f3';
+    ctx.font = '7px system-ui';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(statusIcon, nx + 3, ny + 12);
+
+    // Subtopic text
+    ctx.font = '7px monospace';
+    ctx.fillStyle = isActive ? '#4ade80' : '#4ade8099';
+    ctx.fillText(shortTopic, nx + 13, ny + 11);
+
+    // Agent count badge
+    ctx.font = 'bold 7px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#4ade80';
+    ctx.fillText(group.length + '\u{1F9DF}', nodeX, ny + nodeH + 9);
+  }
+
+  ctx.restore();
+}
+
+// =====================================================================
 // GAME LOOP
 // =====================================================================
 let lastTime = 0;
