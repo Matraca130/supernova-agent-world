@@ -850,11 +850,15 @@ function drawAgentHabbo(agent) {
     agent._zShoulderW = 13 + (h % 4);
     agent._zLegH = 8 + (h >> 2) % 3;
     agent._zTorsoH = 12 + (h >> 4) % 3;
-    agent._hasDragon = (h % 9 === 0);
+    agent._hasDragon = false;
+    // Base creature type: ~30% dragons, 70% zombies (before genome overrides)
+    agent._creatureType = (h % 8 < 3) ? 'dragon' : 'zombie';
     // Wound positions (randomized per zombie)
     agent._zWoundX = -3 + (h >> 6) % 6;
     agent._zWoundY = 2 + (h >> 8) % 5;
     agent._hashInit = true;
+    // Apply genome mutations if available
+    applyGenomeMutations(agent);
   }
   var zs = agent._zSkin, zc = agent._zClothes, zp = agent._zPants, zw = agent._zWound;
   var sw = agent._zShoulderW, lh = agent._zLegH, th = agent._zTorsoH;
