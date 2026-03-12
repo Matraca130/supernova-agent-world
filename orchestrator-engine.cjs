@@ -930,32 +930,60 @@ async function processRoundTurns(pending, debate, debateId, agents, log, startTi
     };
   });
 
+  // Log which agents are entering parallel wait (for dashboard status)
+  const pendingNames = resolvedTurns.map(({ agent }) => agent.name);
+  log('parallel_wait_start', {
+    debateId,
+    round: debate.currentRound,
+    agents: pendingNames,
+    message: `Waiting for ${pendingNames.length} agents in parallel: ${pendingNames.join(', ')}`,
+  });
+
   const waitPromises = resolvedTurns.map(({ agent }) =>
     waitForExternalAgent(debateId, agent.name, log, turnTimeout)
-      .then(msg => ({ agent, msg }))
-      .catch(() => ({ agent, msg: null }))
+      .then(msg => ({ agent, msg, responseTime: Date.now() }))
+      .catch(() => ({ agent, msg: null, responseTime: Date.now() }))
   );
 
   const results = await Promise.allSettled(waitPromises);
 
+  // Track response order and timing for analytics
+  const responseStats = { responded: [], timedOut: [], totalMs: 0 };
+  const batchStart = Date.now();
+
   for (const result of results) {
     const val = result.status === 'fulfilled' ? result.value : { agent: { name: 'unknown', role: 'unknown' }, msg: null };
     if (val.msg) {
+      const respTime = val.responseTime ? val.responseTime - batchStart : 0;
+      responseStats.responded.push({ name: val.agent.name, ms: respTime });
       log('agent_message', {
         agent: val.agent.name,
         role: val.agent.role,
         round: debate.currentRound,
         wordCount: (val.msg.text || '').trim().split(/\s+/).length,
         preview: (val.msg.text || '').slice(0, 200),
+        status: 'responded',
       });
     } else {
+      responseStats.timedOut.push(val.agent.name);
       log('turn_timeout', {
         debateId,
         agent: val.agent.name,
         message: `${val.agent.name} did not respond within ${Math.round(turnTimeout / 1000)}s — skipping turn`,
+        status: 'timeout',
       });
     }
   }
+
+  // Summary log for the round batch
+  log('parallel_wait_end', {
+    debateId,
+    round: debate.currentRound,
+    responded: responseStats.responded.length,
+    timedOut: responseStats.timedOut.length,
+    timedOutAgents: responseStats.timedOut,
+    message: `Round batch complete: ${responseStats.responded.length} responded, ${responseStats.timedOut.length} timed out`,
+  });
 }
 
 // --- Helper: get raw debate data from debate-manager ---
