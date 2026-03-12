@@ -825,193 +825,259 @@ function drawAgentHabbo(agent) {
   const f = agent.facing;
   const walking = agent.path.length > 0;
   const frame = agent.walkFrame;
-  const breathe = agent.idle ? Math.sin(agent.idleTimer * 1.5) * 0.3 : 0;
+  // Zombie shamble: slower, more erratic breathing
+  const breathe = agent.idle ? Math.sin(agent.idleTimer * 0.8) * 0.5 : 0;
   const bodyBob = breathe;
-  const legOffset = walking ? Math.sin(frame * Math.PI / 2) * 3 : 0;
-  const armSwing = walking ? Math.sin(frame * Math.PI / 2) * 2 : Math.sin(agent.idleTimer * 0.8) * 0.5;
+  // Zombie lurch: asymmetric leg movement
+  const legOffset = walking ? Math.sin(frame * Math.PI / 2) * 3.5 : 0;
+  const armSwing = walking ? Math.sin(frame * Math.PI / 2) * 3 : Math.sin(agent.idleTimer * 0.5) * 0.8;
+  // Zombie hunched posture: lean forward when walking
+  const hunch = walking ? 2 : 0;
 
-  // Deterministic randomization from name
+  // Deterministic zombie randomization from name
   if (!agent._hashInit) {
     var h = nameHash(agent.name);
-    agent.hairColor = HAIR_COLORS[h % HAIR_COLORS.length];
-    agent.hairStyle = HAIR_STYLES[(h >> 4) % HAIR_STYLES.length];
-    agent._shoeColor = SHOE_COLORS[(h >> 8) % SHOE_COLORS.length];
-    agent._accessory = ACCESSORIES[(h >> 12) % ACCESSORIES.length];
-    agent._shoulderW = 14 + (h % 5);
-    agent._legH = 9 + (h >> 3) % 4;
-    agent._torsoH = 13 + (h >> 6) % 3;
-    agent._hasDragon = (h % 7 === 0);
+    agent._zSkin = ZOMBIE_SKINS[h % ZOMBIE_SKINS.length];
+    agent._zClothes = ZOMBIE_CLOTHES[(h >> 3) % ZOMBIE_CLOTHES.length];
+    agent._zPants = ZOMBIE_PANTS[(h >> 5) % ZOMBIE_PANTS.length];
+    agent._zWound = ZOMBIE_WOUND_COLORS[(h >> 7) % ZOMBIE_WOUND_COLORS.length];
+    agent._zEye = ZOMBIE_EYE_COLORS[(h >> 9) % ZOMBIE_EYE_COLORS.length];
+    agent._zHead = ZOMBIE_HEAD_TYPES[(h >> 11) % ZOMBIE_HEAD_TYPES.length];
+    agent._zExtra = ZOMBIE_EXTRAS[(h >> 13) % ZOMBIE_EXTRAS.length];
+    agent._zShoulderW = 13 + (h % 4);
+    agent._zLegH = 8 + (h >> 2) % 3;
+    agent._zTorsoH = 12 + (h >> 4) % 3;
+    agent._hasDragon = (h % 9 === 0);
+    // Wound positions (randomized per zombie)
+    agent._zWoundX = -3 + (h >> 6) % 6;
+    agent._zWoundY = 2 + (h >> 8) % 5;
     agent._hashInit = true;
   }
-  var sw = agent._shoulderW;
-  var lh = agent._legH;
-  var th = agent._torsoH;
+  var zs = agent._zSkin, zc = agent._zClothes, zp = agent._zPants, zw = agent._zWound;
+  var sw = agent._zShoulderW, lh = agent._zLegH, th = agent._zTorsoH;
+  var halfSw = Math.floor(sw / 2);
 
   ctx.save();
   ctx.translate(sx, sy);
 
-  // Glow
+  // Eerie glow when speaking
   if (agent.glowAlpha > 0) {
-    const ga = Math.floor(agent.glowAlpha * 60).toString(16).padStart(2,'0');
-    ctx.beginPath(); ctx.arc(0, -16, 28, 0, Math.PI*2);
-    ctx.fillStyle = agent.color + ga; ctx.fill();
+    const ga = Math.floor(agent.glowAlpha * 50).toString(16).padStart(2,'0');
+    ctx.beginPath(); ctx.arc(hunch*f, -16, 30, 0, Math.PI*2);
+    ctx.fillStyle = '#4ade80' + ga; ctx.fill();
   }
 
-  // Shadow
-  ctx.beginPath(); ctx.ellipse(0, 5, 13, 5, 0, 0, Math.PI*2);
-  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fill();
+  // Shadow (slightly elongated for zombie)
+  ctx.beginPath(); ctx.ellipse(hunch*f, 5, 14, 5, 0, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fill();
 
-  // Feet (variable shoe color)
+  // === FEET (tattered shoes/bare) ===
   var feetY = 0 + bodyBob;
-  drawBlock(ctx, -6+legOffset*0.3, feetY, 5, 3, agent._shoeColor);
-  drawBlock(ctx, 1-legOffset*0.3, feetY, 5, 3, agent._shoeColor);
+  drawBlock(ctx, -6+legOffset*0.3+hunch*f*0.3, feetY, 5, 3, darkenColor(zp, 20));
+  drawBlock(ctx, 1-legOffset*0.3+hunch*f*0.3, feetY, 5, 3, darkenColor(zp, 20));
+  // Toe bones peeking out on some
+  if (agent._zExtra === 'bone_arm' || agent._zHead === 'skull') {
+    drawBlock(ctx, -5+legOffset*0.3+hunch*f*0.3, feetY, 2, 1, '#e8dcc8', false);
+  }
 
-  // Legs (variable height)
+  // === LEGS (torn pants) ===
   var legY = feetY - lh;
-  drawBlock(ctx, -5+legOffset*0.4, legY, 4, lh, darkenColor(agent.color, 30));
-  drawBlock(ctx, 1-legOffset*0.4, legY, 4, lh, darkenColor(agent.color, 30));
+  drawBlock(ctx, -5+legOffset*0.4+hunch*f*0.3, legY, 4, lh, zp);
+  drawBlock(ctx, 1-legOffset*0.4+hunch*f*0.3, legY, 4, lh, zp);
+  // Torn patches on legs
+  drawBlock(ctx, -4+legOffset*0.3, legY+2, 2, 2, darkenColor(zp, 30), false);
+  // Exposed skin through torn pants
+  drawBlock(ctx, 2-legOffset*0.3, legY+lh-3, 2, 2, zs, false);
 
-  // Torso (variable width & height)
+  // === TORSO (hunched forward, torn jacket) ===
   var torsoY = legY - th + bodyBob;
-  var halfSw = Math.floor(sw / 2);
-  drawBlock(ctx, -halfSw, torsoY, sw, th, agent.color);
-  drawBlock(ctx, -halfSw+3, torsoY+2, sw-6, th-4, lightenColor(agent.color, 20), false);
-  drawBlock(ctx, -halfSw, torsoY+th-2, sw, 2, darkenColor(agent.color, 40), false);
+  // Main jacket
+  drawBlock(ctx, -halfSw+hunch*f, torsoY, sw, th, zc);
+  // Jacket detail (collar/lapel darker)
+  drawBlock(ctx, -halfSw+2+hunch*f, torsoY, sw-4, 3, darkenColor(zc, 20), false);
+  // Shirt underneath (visible through tears)
+  drawBlock(ctx, -halfSw+3+hunch*f, torsoY+4, sw-6, th-6, lightenColor(zc, 15), false);
+  // Wound on torso
+  drawBlock(ctx, agent._zWoundX+hunch*f, torsoY+agent._zWoundY, 3, 2, zw, false);
+  // Belt
+  drawBlock(ctx, -halfSw+hunch*f, torsoY+th-2, sw, 2, darkenColor(zc, 40), false);
 
-  // Arms (scale with torso)
+  // === ARMS (one reaching forward zombie-style) ===
   var armY = torsoY + 1;
-  var armH = th - 2;
-  drawBlock(ctx, -halfSw-3, armY+armSwing, 4, armH, agent.color);
-  drawBlock(ctx, halfSw-1, armY-armSwing, 4, armH, agent.color);
-  drawBlock(ctx, -halfSw-3, armY+armH+armSwing, 4, 3, agent.skin, false);
-  drawBlock(ctx, halfSw-1, armY+armH-armSwing, 4, 3, agent.skin, false);
+  var armH = th - 3;
+  // Back arm (normal-ish)
+  drawBlock(ctx, -halfSw-3+hunch*f, armY+armSwing, 4, armH, zc);
+  drawBlock(ctx, -halfSw-3+hunch*f, armY+armH+armSwing, 4, 3, zs, false);
+  // Front arm (extended forward, zombie reach)
+  var reachX = halfSw-1+hunch*f;
+  var reachExt = walking ? 4 : 2;
+  drawBlock(ctx, reachX, armY-armSwing-reachExt, 4, armH+reachExt, zc);
+  // Hand (reaching, skin showing)
+  drawBlock(ctx, reachX, armY-armSwing-reachExt-2, 4, 3, zs, false);
+  // Fingers (pixel claws)
+  drawBlock(ctx, reachX+1, armY-armSwing-reachExt-3, 1, 2, darkenColor(zs, 30), false);
+  drawBlock(ctx, reachX+3, armY-armSwing-reachExt-3, 1, 2, darkenColor(zs, 30), false);
 
-  // Head (15px wide, adult proportions — body dominates)
-  var headY = torsoY - 13 + bodyBob;
-  drawBlock(ctx, -8, headY, 15, 12, agent.skin);
-  drawBlock(ctx, -9, headY+4, 2, 3, agent.skin, false);
-  drawBlock(ctx, 6, headY+4, 2, 3, agent.skin, false);
+  // === HEAD (slightly tilted, zombie features) ===
+  var headY = torsoY - 12 + bodyBob;
+  var headTilt = f * (walking ? 1 : 0);
+  // Base head shape
+  drawBlock(ctx, -7+headTilt+hunch*f, headY, 14, 11, zs);
+  // Jaw (slightly open, darker)
+  drawBlock(ctx, -5+headTilt+hunch*f, headY+8, 10, 3, darkenColor(zs, 15), false);
+  // Ears
+  drawBlock(ctx, -8+headTilt+hunch*f, headY+3, 2, 3, darkenColor(zs, 10), false);
+  drawBlock(ctx, 6+headTilt+hunch*f, headY+3, 2, 3, darkenColor(zs, 10), false);
 
-  // Eyes (adjusted for 15x12 head)
+  // Eyes (glowing zombie eyes)
   if (!agent.blinking) {
-    var ex1 = f > 0 ? -4 : -2, ex2 = f > 0 ? 2 : 0;
-    drawBlock(ctx, ex1, headY+4, 3, 3, '#1a1a2e', false);
-    drawBlock(ctx, ex2, headY+4, 3, 3, '#1a1a2e', false);
-    drawBlock(ctx, ex1+1, headY+4, 1, 1, '#fff', false);
-    drawBlock(ctx, ex2+1, headY+4, 1, 1, '#fff', false);
+    var ex1 = f > 0 ? -3 : -1, ex2 = f > 0 ? 2 : 0;
+    var eOff = headTilt+hunch*f;
+    // Eye sockets (dark)
+    drawBlock(ctx, ex1-1+eOff, headY+3, 4, 4, '#1a1a1a', false);
+    drawBlock(ctx, ex2+eOff, headY+3, 4, 4, '#1a1a1a', false);
+    // Glowing pupils
+    drawBlock(ctx, ex1+eOff, headY+4, 2, 2, agent._zEye, false);
+    if (agent._zHead !== 'one_eye') {
+      drawBlock(ctx, ex2+1+eOff, headY+4, 2, 2, agent._zEye, false);
+    } else {
+      // X for missing eye
+      drawBlock(ctx, ex2+1+eOff, headY+4, 2, 2, zw, false);
+    }
   } else {
-    var ex1 = f > 0 ? -4 : -2, ex2 = f > 0 ? 2 : 0;
-    drawBlock(ctx, ex1, headY+5, 3, 1, '#1a1a2e', false);
-    drawBlock(ctx, ex2, headY+5, 3, 1, '#1a1a2e', false);
+    var ex1 = f > 0 ? -3 : -1, ex2 = f > 0 ? 2 : 0;
+    var eOff = headTilt+hunch*f;
+    drawBlock(ctx, ex1+eOff, headY+5, 3, 1, '#1a1a1a', false);
+    drawBlock(ctx, ex2+1+eOff, headY+5, 3, 1, '#1a1a1a', false);
   }
 
-  // Mouth
+  // Mouth (open, showing teeth)
+  var mOff = headTilt+hunch*f;
   if (agent.bubble) {
-    drawBlock(ctx, -2, headY+8, 4, 2, '#c0392b', false);
+    // Open mouth screaming
+    drawBlock(ctx, -2+mOff, headY+8, 5, 3, '#1a0a0a', false);
+    drawBlock(ctx, -1+mOff, headY+8, 1, 1, '#ddd', false); // tooth
+    drawBlock(ctx, 1+mOff, headY+8, 1, 1, '#ddd', false); // tooth
+    drawBlock(ctx, 0+mOff, headY+10, 3, 1, zw, false); // blood
   } else {
-    drawBlock(ctx, -1, headY+9, 3, 1, darkenColor(agent.skin, 40), false);
+    drawBlock(ctx, -1+mOff, headY+8, 4, 2, '#2a1a1a', false);
+    drawBlock(ctx, 0+mOff, headY+8, 1, 1, '#ddd', false); // tooth
+    drawBlock(ctx, 2+mOff, headY+8, 1, 1, '#ccc', false); // tooth
   }
 
-  // Hair (8 styles including long, buzz, curly)
-  var hc = agent.hairColor;
-  switch(agent.hairStyle) {
-    case 'flat':
-      drawBlock(ctx, -9, headY-4, 17, 5, hc);
-      drawBlock(ctx, -8, headY-2, 15, 3, hc, false); break;
-    case 'spiky':
-      drawBlock(ctx, -9, headY-3, 17, 4, hc);
-      drawBlock(ctx, -7, headY-7, 3, 4, hc);
-      drawBlock(ctx, -2, headY-9, 4, 6, hc);
-      drawBlock(ctx, 4, headY-6, 3, 3, hc); break;
-    case 'swept':
-      drawBlock(ctx, -9, headY-3, 17, 4, hc);
-      drawBlock(ctx, -9, headY-6, 10, 3, hc);
-      drawBlock(ctx, f>0?4:-9, headY-1, 4, 5, hc); break;
-    case 'mohawk':
-      drawBlock(ctx, -9, headY-2, 17, 3, hc);
-      drawBlock(ctx, -3, headY-10, 6, 8, lightenColor(hc, 30));
-      drawBlock(ctx, -2, headY-12, 4, 3, lightenColor(hc, 50)); break;
-    case 'dome':
-      drawBlock(ctx, -9, headY-4, 17, 5, hc);
-      drawBlock(ctx, -7, headY-7, 13, 4, hc);
-      drawBlock(ctx, -5, headY-9, 9, 3, lightenColor(hc, 20)); break;
-    case 'long':
-      drawBlock(ctx, -9, headY-3, 17, 4, hc);
-      drawBlock(ctx, f>0?-9:3, headY+1, 5, 10, hc);
-      drawBlock(ctx, f>0?-9:3, headY+8, 4, 4, lightenColor(hc, 15)); break;
-    case 'buzz':
-      drawBlock(ctx, -8, headY-2, 15, 3, hc); break;
-    case 'curly':
-      drawBlock(ctx, -10, headY-5, 19, 6, hc);
-      drawBlock(ctx, -9, headY-3, 17, 5, lightenColor(hc, 15), false);
-      drawBlock(ctx, -10, headY+1, 3, 4, hc);
-      drawBlock(ctx, 6, headY+1, 3, 4, hc); break;
+  // === HEAD TYPE VARIATIONS ===
+  var hOff = headTilt+hunch*f;
+  switch(agent._zHead) {
+    case 'exposed_brain':
+      // Cracked skull top with brain showing
+      drawBlock(ctx, -5+hOff, headY-3, 10, 4, darkenColor(zs, 10));
+      drawBlock(ctx, -3+hOff, headY-4, 7, 3, '#c0392b');
+      drawBlock(ctx, -2+hOff, headY-3, 5, 2, '#e8a0a0', false); // brain pink
+      drawBlock(ctx, -1+hOff, headY-4, 3, 2, '#d4817a', false); // brain folds
+      break;
+    case 'bandaged':
+      drawBlock(ctx, -6+hOff, headY-2, 12, 3, '#e8e0d0');
+      drawBlock(ctx, -7+hOff, headY+1, 14, 2, '#e8e0d0');
+      drawBlock(ctx, -5+hOff, headY-1, 2, 1, zw, false); // blood seep
+      break;
+    case 'cracked':
+      drawBlock(ctx, -6+hOff, headY-2, 12, 3, darkenColor(zs, 15));
+      ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(-2+hOff, headY-2); ctx.lineTo(1+hOff, headY+3); ctx.lineTo(-1+hOff, headY+6); ctx.stroke();
+      break;
+    case 'stitched':
+      drawBlock(ctx, -6+hOff, headY-2, 12, 3, darkenColor(zs, 10));
+      ctx.strokeStyle = '#333'; ctx.lineWidth = 0.8;
+      for (var si = 0; si < 4; si++) {
+        ctx.beginPath(); ctx.moveTo(-3+si*2+hOff, headY+2); ctx.lineTo(-3+si*2+hOff, headY+5); ctx.stroke();
+      }
+      ctx.beginPath(); ctx.moveTo(-3+hOff, headY+3); ctx.lineTo(5+hOff, headY+3); ctx.stroke();
+      break;
+    case 'rotting':
+      drawBlock(ctx, -6+hOff, headY-2, 12, 3, darkenColor(zs, 20));
+      drawBlock(ctx, 2+hOff, headY+2, 3, 3, darkenColor(zs, 40), false); // rotted patch
+      drawBlock(ctx, 3+hOff, headY+3, 2, 2, '#5a4a3a', false); // exposed
+      break;
+    case 'skull':
+      drawBlock(ctx, -6+hOff, headY-2, 12, 3, '#e8dcc8');
+      drawBlock(ctx, -5+hOff, headY-1, 10, 2, '#ddd0c0', false);
+      break;
+    default: // 'normal' or 'one_eye'
+      // Sparse zombie hair
+      drawBlock(ctx, -6+hOff, headY-3, 4, 3, darkenColor(zs, 30));
+      drawBlock(ctx, 1+hOff, headY-2, 5, 2, darkenColor(zs, 30));
+      drawBlock(ctx, -4+hOff, headY-4, 3, 2, darkenColor(zs, 25));
+      break;
   }
 
-  // Accessories (8 types)
-  switch(agent._accessory) {
-    case 'glasses':
-      drawBlock(ctx, -5, headY+3, 4, 3, '#333');
-      drawBlock(ctx, 0, headY+3, 4, 3, '#333');
-      drawBlock(ctx, -1, headY+4, 2, 1, '#333', false); break;
-    case 'scarf':
-      drawBlock(ctx, -halfSw, torsoY-1, sw, 3, '#e74c3c');
-      drawBlock(ctx, -halfSw-1, torsoY, 2, 5, '#c0392b'); break;
-    case 'badge':
-      drawBlock(ctx, halfSw-5, torsoY+3, 4, 4, '#f1c40f');
-      drawBlock(ctx, halfSw-4, torsoY+4, 2, 2, '#e67e22', false); break;
-    case 'hat':
-      drawBlock(ctx, -10, headY-8, 19, 4, darkenColor(hc, 30));
-      drawBlock(ctx, -7, headY-12, 13, 5, darkenColor(hc, 20)); break;
-    case 'antenna':
-      drawBlock(ctx, 0, headY-10, 1, 7, '#999');
-      drawBlock(ctx, -1, headY-12, 3, 3, '#4ade80'); break;
-    case 'eyepatch':
-      drawBlock(ctx, f>0?-5:1, headY+3, 5, 4, '#1a1a2e');
-      ctx.strokeStyle='#333'; ctx.lineWidth=1;
-      ctx.beginPath(); ctx.moveTo(f>0?-5:6, headY+5); ctx.lineTo(f>0?-9:9, headY+1); ctx.stroke(); break;
-    case 'horns':
-      drawBlock(ctx, -8, headY-6, 3, 4, '#8b0000');
-      drawBlock(ctx, 4, headY-6, 3, 4, '#8b0000');
-      drawBlock(ctx, -7, headY-8, 2, 3, '#a00000');
-      drawBlock(ctx, 4, headY-8, 2, 3, '#a00000'); break;
+  // === ZOMBIE EXTRAS ===
+  switch(agent._zExtra) {
+    case 'chain':
+      ctx.strokeStyle = '#888'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(-halfSw+hunch*f, torsoY+2); 
+      ctx.lineTo(-halfSw-5+hunch*f, torsoY+6);
+      ctx.lineTo(-halfSw-3+hunch*f, torsoY+10); ctx.stroke();
+      break;
+    case 'bolt_neck':
+      drawBlock(ctx, -9+hOff, headY+6, 3, 2, '#888');
+      drawBlock(ctx, 6+hOff, headY+6, 3, 2, '#888');
+      break;
+    case 'torn_ear':
+      drawBlock(ctx, -9+hOff, headY+2, 2, 4, zs, false);
+      drawBlock(ctx, -9+hOff, headY+5, 1, 2, zw, false);
+      break;
+    case 'blood_drip':
+      var drip = Math.floor(agent.idleTimer * 2) % 6;
+      drawBlock(ctx, 3+hOff, headY+9, 1, 2+drip, zw, false);
+      break;
+    case 'hook_hand':
+      drawBlock(ctx, -halfSw-4+hunch*f, armY+armH+armSwing, 2, 5, '#888');
+      drawBlock(ctx, -halfSw-5+hunch*f, armY+armH+armSwing+3, 3, 1, '#aaa', false);
+      break;
+    case 'missing_jaw':
+      drawBlock(ctx, -4+mOff, headY+9, 8, 2, darkenColor(zs, 30));
+      drawBlock(ctx, -2+mOff, headY+10, 5, 1, zw, false);
+      break;
   }
 
-  // Name tag
+  // === NAME TAG (green-tinted for zombie theme) ===
   var label = agent._labelText || agent.name.substring(0, 10);
   var tw = agent.getLabelWidth(ctx);
   ctx.imageSmoothingEnabled = true;
-  ctx.fillStyle = 'rgba(0,0,0,0.8)';
-  ctx.fillRect(Math.round(-tw/2-5), headY-20, tw+10, 13);
-  ctx.strokeStyle = agent.color + '88'; ctx.lineWidth = 1;
-  ctx.strokeRect(Math.round(-tw/2-5)+0.5, headY-20+0.5, tw+9, 12);
+  ctx.fillStyle = 'rgba(10,20,10,0.85)';
+  ctx.fillRect(Math.round(-tw/2-5), headY-22, tw+10, 13);
+  ctx.strokeStyle = '#4ade8066'; ctx.lineWidth = 1;
+  ctx.strokeRect(Math.round(-tw/2-5)+0.5, headY-22+0.5, tw+9, 12);
   ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
   ctx.fillStyle = agent.color;
-  ctx.fillText(label, 0, headY-10);
+  ctx.fillText(label, 0, headY-12);
   ctx.imageSmoothingEnabled = false;
 
   ctx.restore();
 
-  // Dragon companion
+  // Dragon companion (rare)
   if (agent._hasDragon) {
-    drawDragon(ctx, sx + f * 18, sy - 5, agent.idleTimer);
+    drawDragon(ctx, sx + f * 20, sy - 5, agent.idleTimer);
   }
 
-  // Thinking indicator: animated dots above agent when in "thinking" state
+  // Thinking indicator: green zombie thought bubbles
   const agentState = getAgentState(agent.name);
   if (agentState.state === 'thinking' && !agent.bubble) {
-    const dotTime = Date.now() / 400;
-    const dotY = headY - 25;
-    ctx.fillStyle = '#fdcb6e';
+    ctx.save();
+    ctx.translate(sx, sy);
+    const dotTime = Date.now() / 500;
+    const dotY = headY - 28;
     for (let di = 0; di < 3; di++) {
-      const bounce = Math.sin(dotTime + di * 0.8) * 2;
-      const alpha = (Math.sin(dotTime + di * 0.8) + 1) / 2;
-      ctx.globalAlpha = 0.4 + alpha * 0.6;
+      const bounce = Math.sin(dotTime + di * 0.9) * 3;
+      const alpha = (Math.sin(dotTime + di * 0.9) + 1) / 2;
+      ctx.globalAlpha = 0.3 + alpha * 0.7;
+      ctx.fillStyle = '#4ade80';
       ctx.beginPath();
-      ctx.arc(-4 + di * 4, dotY + bounce, 1.5, 0, Math.PI * 2);
+      ctx.arc(-4 + di * 4, dotY + bounce, 1.5 + di * 0.3, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   if (agent.bubble) { drawBubble(agent, sx, sy - 65); }
