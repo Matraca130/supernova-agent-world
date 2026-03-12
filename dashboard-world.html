@@ -1047,6 +1047,23 @@ function drawAgentHabbo(agent) {
     drawDragon(ctx, sx + f * 18, sy - 5, agent.idleTimer);
   }
 
+  // Thinking indicator: animated dots above agent when in "thinking" state
+  const agentState = getAgentState(agent.name);
+  if (agentState.state === 'thinking' && !agent.bubble) {
+    const dotTime = Date.now() / 400;
+    const dotY = headY - 25;
+    ctx.fillStyle = '#fdcb6e';
+    for (let di = 0; di < 3; di++) {
+      const bounce = Math.sin(dotTime + di * 0.8) * 2;
+      const alpha = (Math.sin(dotTime + di * 0.8) + 1) / 2;
+      ctx.globalAlpha = 0.4 + alpha * 0.6;
+      ctx.beginPath();
+      ctx.arc(-4 + di * 4, dotY + bounce, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   if (agent.bubble) { drawBubble(agent, sx, sy - 65); }
 }
 
