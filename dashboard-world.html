@@ -1803,6 +1803,17 @@ async function pollWorld() {
       }
     } catch { /* micro endpoint not available, ignore */ }
 
+    // Poll genome data for mutation tracking
+    try {
+      const genomeRes = await fetch(`${API_BASE}/api/genome`);
+      if (genomeRes.ok) {
+        const gData = await genomeRes.json();
+        if (gData && gData.genome) {
+          genomeData = gData.genome;
+        }
+      }
+    } catch { /* genome endpoint not available, ignore */ }
+
     renderAgentCards();
 
   } catch (e) {
