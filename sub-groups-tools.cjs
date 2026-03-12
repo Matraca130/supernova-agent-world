@@ -10,6 +10,7 @@
 
 const sg = require('./sub-groups.cjs');
 const dm = require('./debate-manager.cjs');
+const mt = require('./micro-topics.cjs');
 
 /**
  * Register all sub-group and pipeline tools with the MCP server
