@@ -1475,6 +1475,26 @@ async function pollWorld() {
       lastMsgCount = msgs.length;
     }
 
+    // Poll micro-round assignments (if orchestrator exposes them)
+    try {
+      const microRes = await fetch(`${API_BASE}/api/micro-assignments`);
+      if (microRes.ok) {
+        const microData = await microRes.json();
+        if (microData && microData.assignments) {
+          microAssignments = microData.assignments;
+          microPhaseActive = Object.keys(microAssignments).length > 0;
+          // Update phase display when micro-round is active
+          if (microPhaseActive) {
+            document.getElementById('phaseDisplay').textContent =
+              `🔬 MICRO-ROUND (${Object.keys(microAssignments).length} agents in micro-debates)`;
+          }
+        } else {
+          microAssignments = {};
+          microPhaseActive = false;
+        }
+      }
+    } catch { /* micro endpoint not available, ignore */ }
+
     renderAgentCards();
 
   } catch (e) {
