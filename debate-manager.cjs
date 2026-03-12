@@ -273,7 +273,7 @@ function createDebate(topic, maxRounds = 10, customRoles = null, intensity = 'ad
 
   // minExchanges: cuántas veces debe hablar cada agente por ronda antes de avanzar
   // adversarial = 2 (posición + réplica), moderado = 1, casual = 1
-  const minExchangesMap = { ADVERSARIAL: 2, Moderado: 1, Casual: 1 };
+  const minExchangesMap = { ADVERSARIAL: 2, Moderado: 1, Casual: 1, MICRO: 1 };
 
   const debate = {
     id,
