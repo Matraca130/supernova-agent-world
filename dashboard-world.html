@@ -1864,6 +1864,44 @@ function renderRoomLegend() {
   ).join('');
 }
 
+function renderGenomeBar() {
+  if (!genomeData || !genomeData.genes) {
+    document.getElementById('genomeBar').innerHTML = '<span style="color:var(--text-dim)">No genome data</span>';
+    document.getElementById('genomeDisplay').textContent = '-';
+    return;
+  }
+  var g = genomeData.genes;
+  document.getElementById('genomeDisplay').textContent = `Gen ${genomeData.generation || 0}`;
+
+  var geneNames = {
+    argumentDepth: { label: 'Depth', icon: '\u{1F9E0}', color: '#a78bfa' },
+    adversarialIntensity: { label: 'Aggro', icon: '\u2694\ufe0f', color: '#e74c3c' },
+    concisenessPreference: { label: 'Focus', icon: '\u{1F3AF}', color: '#fdcb6e' },
+    explorationRate: { label: 'Explore', icon: '\u{1F409}', color: '#2ecc71' },
+    collaborationBias: { label: 'Collab', icon: '\u{1F91D}', color: '#3498db' },
+    decompositionAffinity: { label: 'Decomp', icon: '\u{1F52C}', color: '#4ade80' },
+  };
+  var html = Object.entries(geneNames).map(function(e) {
+    var key = e[0], info = e[1];
+    var val = g[key];
+    if (val === undefined) return '';
+    var pct = Math.round(val * 100);
+    var barW = Math.round(val * 60);
+    var level = val < 0.33 ? 'low' : val > 0.66 ? 'high' : 'mid';
+    return `<div style="display:flex;align-items:center;gap:4px;margin:2px 0">
+      <span style="width:14px">${info.icon}</span>
+      <span style="width:42px;font-size:8px;color:var(--text-dim)">${info.label}</span>
+      <div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden">
+        <div style="width:${barW}px;max-width:100%;height:100%;background:${info.color};border-radius:3px;transition:width 0.5s"></div>
+      </div>
+      <span style="width:24px;text-align:right;font-size:8px;color:${level==='high'?info.color:level==='low'?'var(--red)':'var(--text-dim)'}">${pct}%</span>
+    </div>`;
+  }).join('');
+
+  html += `<div style="margin-top:4px;font-size:8px;color:var(--text-dim)">Fitness: ${genomeData.fitnessEMA !== null ? (genomeData.fitnessEMA * 100).toFixed(0) + '%' : '-'} | History: ${genomeData.historyLength || 0}</div>`;
+  document.getElementById('genomeBar').innerHTML = html;
+}
+
 // =====================================================================
 // MICRO-TOPIC TREE VISUALIZATION
 // =====================================================================
