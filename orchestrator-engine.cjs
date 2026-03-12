@@ -1017,4 +1017,4 @@ function getDebateData(debateId) {
   };
 }
 
-module.exports = { runDebate };
+module.exports = { runDebate, getAllHeartbeats, getHeartbeat, updateHeartbeat };
