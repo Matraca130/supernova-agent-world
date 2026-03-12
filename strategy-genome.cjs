@@ -88,6 +88,11 @@ function validateGenome(genome) {
   if (!genome.genes || typeof genome.genes !== 'object') return false;
   for (const name of GENE_NAMES) {
     const val = genome.genes[name];
+    // Backward compat: if gene is missing (e.g., newly added), auto-fill with baseline
+    if (val === undefined) {
+      genome.genes[name] = GENE_DEFINITIONS[name].baseline;
+      continue;
+    }
     if (typeof val !== 'number' || val < 0 || val > 1 || isNaN(val)) return false;
   }
   return true;
