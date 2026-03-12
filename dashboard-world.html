@@ -1541,6 +1541,7 @@ function renderAgentCards() {
       </div>
       <div style="font-size:10px;color:var(--text-dim)">${esc(a.role)} | ${a.messageCount} msgs</div>
       <div style="font-size:10px;color:${stateColor};margin-top:2px">${stateEmoji} ${stateLabel}</div>
+      ${microAssignments[a.name] ? `<div style="font-size:9px;color:#4ade80;margin-top:2px">\u{1F52C} ${esc((microAssignments[a.name].subtopic||'').substring(0,40))}</div>` : ''}
       ${a.bubble ? `<div class="agent-card-bubble">"${esc(a.bubble)}"</div>` : ''}
     </div>`;
   }).join('');
