@@ -785,13 +785,15 @@ function drawAgent(agent) {
   }
 }
 
-// ── HABBO STYLE SPRITE v3 (adult, randomized, dragon) ──
-const HAIR_COLORS = ['#2c1810','#4a2c17','#8b4513','#d4a574','#1a1a2e','#c0392b','#f39c12','#2ecc71','#9b59b6','#1abc9c','#e74c3c','#3498db'];
-const HAIR_STYLES = ['flat','spiky','swept','mohawk','dome','long','buzz','curly'];
-const SHOE_COLORS = ['#2c3e50','#1a1a2e','#8b4513','#c0392b','#2c1810','#34495e','#7f8c8d','#d35400'];
-const ACCESSORIES = ['none','glasses','scarf','badge','hat','antenna','eyepatch','horns'];
-let hairColorIdx = 0;
-let hairStyleIdx = 0;
+// ── ZOMBIE PIXEL ART SYSTEM (inspired by reference zombie sprite) ──
+// Randomized zombie agents: green/gray skin, torn clothes, wounds, accessories
+const ZOMBIE_SKINS = ['#7a9e6e','#8faa7a','#6b8b5e','#9aab84','#b0b89a','#6e7d5e','#8a9b6f','#a0a87a','#5e7050','#c8c89a'];
+const ZOMBIE_CLOTHES = ['#3a3f47','#4a4f57','#2c3038','#484d55','#555a62','#38404a','#343940','#5a5f67','#2e3540','#464b53'];
+const ZOMBIE_PANTS = ['#6b4f3a','#5a4530','#7a5e48','#4e3b2a','#8a7060','#6d5040','#5c4838','#786050','#4a3828','#907868'];
+const ZOMBIE_WOUND_COLORS = ['#c0392b','#e74c3c','#a93226','#d35400','#8b0000','#b22222'];
+const ZOMBIE_EYE_COLORS = ['#f1c40f','#e67e22','#e74c3c','#2ecc71','#fdcb6e','#ff6b6b'];
+const ZOMBIE_HEAD_TYPES = ['normal','exposed_brain','bandaged','cracked','one_eye','stitched','rotting','skull'];
+const ZOMBIE_EXTRAS = ['none','chain','bolt_neck','torn_ear','blood_drip','bone_arm','hook_hand','missing_jaw'];
 
 // Deterministic hash from agent name for consistent randomization
 function nameHash(name) {
@@ -800,75 +802,19 @@ function nameHash(name) {
   return Math.abs(h);
 }
 
-function drawCat(ctx, x, y, time, catColor) {
-  var tailWag = Math.sin(time * 2.5) * 3;
-  // Body
-  drawBlock(ctx, x, y, 8, 5, catColor);
-  drawBlock(ctx, x+1, y+1, 6, 3, lightenColor(catColor, 20), false);
-  // Head
-  drawBlock(ctx, x+6, y-3, 6, 5, catColor);
-  // Ears
-  drawBlock(ctx, x+7, y-5, 2, 2, catColor);
-  drawBlock(ctx, x+10, y-5, 2, 2, catColor);
-  drawBlock(ctx, x+7, y-5, 1, 1, '#ffb6c1', false);
-  drawBlock(ctx, x+11, y-5, 1, 1, '#ffb6c1', false);
-  // Eyes
-  drawBlock(ctx, x+8, y-2, 1, 1, '#2ecc71', false);
-  drawBlock(ctx, x+10, y-2, 1, 1, '#2ecc71', false);
-  // Nose
-  drawBlock(ctx, x+9, y, 1, 1, '#ffb6c1', false);
-  // Tail
-  drawBlock(ctx, x-3, y+1+tailWag*0.3, 4, 2, catColor);
-  drawBlock(ctx, x-5, y+tailWag*0.5, 3, 2, catColor);
-  drawBlock(ctx, x-7, y-1+tailWag*0.7, 2, 2, lightenColor(catColor, 15));
-  // Legs
-  drawBlock(ctx, x+1, y+5, 2, 2, darkenColor(catColor, 20));
-  drawBlock(ctx, x+5, y+5, 2, 2, darkenColor(catColor, 20));
-}
-
-function drawRobot(ctx, x, y, time) {
-  // Body
-  drawBlock(ctx, x, y, 6, 7, '#95a5a6');
-  drawBlock(ctx, x+1, y+1, 4, 5, '#bdc3c7', false);
-  // Head
-  drawBlock(ctx, x-1, y-5, 8, 5, '#bdc3c7');
-  // Eyes
-  drawBlock(ctx, x+1, y-4, 2, 2, '#00cec9', false);
-  drawBlock(ctx, x+4, y-4, 2, 2, '#00cec9', false);
-  // Antenna
-  drawBlock(ctx, x+2, y-9, 1, 4, '#7f8c8d');
-  var ledOn = Math.sin(time * 4) > 0;
-  drawBlock(ctx, x+1, y-11, 3, 2, ledOn ? '#4ade80' : '#e74c3c', false);
-  // Arms
-  drawBlock(ctx, x-2, y+1, 2, 4, '#7f8c8d');
-  drawBlock(ctx, x+6, y+1, 2, 4, '#7f8c8d');
-  // Legs
-  drawBlock(ctx, x+1, y+7, 2, 2, '#7f8c8d');
-  drawBlock(ctx, x+4, y+7, 2, 2, '#7f8c8d');
-}
-
-var CAT_COLORS = ['#e67e22','#2c3e50','#ecf0f1','#95a5a6','#e74c3c'];
-var CREATURE_TYPES = ['dragon','cat','robot','none'];
-
 function drawDragon(ctx, x, y, time) {
   var wingFlap = Math.sin(time * 3) * 2;
-  // Body
   drawBlock(ctx, x, y, 10, 7, '#27ae60');
   drawBlock(ctx, x+1, y+1, 8, 5, '#2ecc71', false);
-  // Head
   drawBlock(ctx, x+8, y-3, 7, 6, '#27ae60');
-  drawBlock(ctx, x+13, y-1, 2, 1, '#e74c3c', false); // nostril
-  drawBlock(ctx, x+11, y-2, 2, 2, '#f1c40f', false); // eye
-  // Wings
+  drawBlock(ctx, x+13, y-1, 2, 1, '#e74c3c', false);
+  drawBlock(ctx, x+11, y-2, 2, 2, '#f1c40f', false);
   drawBlock(ctx, x+2, y-5+wingFlap, 6, 3, '#2ecc7188');
   drawBlock(ctx, x+3, y-7+wingFlap, 4, 2, '#27ae6088');
-  // Tail
   drawBlock(ctx, x-4, y+2, 5, 3, '#27ae60');
   drawBlock(ctx, x-7, y+1, 4, 2, '#2ecc71');
   drawBlock(ctx, x-9, y, 3, 2, '#27ae60');
-  // Tail spike
   drawBlock(ctx, x-10, y-1, 2, 2, '#e74c3c', false);
-  // Legs
   drawBlock(ctx, x+2, y+7, 2, 3, '#1e8449');
   drawBlock(ctx, x+7, y+7, 2, 3, '#1e8449');
 }
