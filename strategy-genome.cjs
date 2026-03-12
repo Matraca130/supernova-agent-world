@@ -324,6 +324,16 @@ function expressGenome(genome, defaultInstructions) {
     instructions.push('CONSTRUYE activamente sobre ideas de otros. Cita y extiende argumentos previos.');
   }
 
+  // decompositionAffinity
+  const da = genome.genes.decompositionAffinity;
+  if (da !== undefined) {
+    if (da < 0.33) {
+      instructions.push('Mantén el debate enfocado en el tema principal. Evita abrir subtemas.');
+    } else if (da > 0.66) {
+      instructions.push('IDENTIFICA subtemas específicos que necesitan análisis separado. Cuando un punto es complejo, señálalo explícitamente en tus DIVERGENCIAS o PREGUNTAS del checkpoint.');
+    }
+  }
+
   // If all genes are neutral and we have default instructions, use those
   if (instructions.length === 0 && defaultInstructions) {
     return `\nESTRATEGIA DE DEBATE (genoma neutral, frame del rol):\n${defaultInstructions}\n`;
