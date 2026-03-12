@@ -1906,9 +1906,6 @@ function renderGenomeBar() {
 // =====================================================================
 // MICRO-TOPIC TREE VISUALIZATION
 // =====================================================================
-let microTreeData = null; // Cached tree data from API
-let microTreeLastFetch = 0;
-
 function drawMicroTopicTree() {
   // Group assignments by room for connection drawing
   const roomGroups = {}; // { room: [{ agentName, subtopic, status }] }
