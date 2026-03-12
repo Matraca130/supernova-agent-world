@@ -25,6 +25,32 @@
 const fs = require('fs');
 const path = require('path');
 const dm = require('./debate-manager.cjs');
+const { buildRoundSynthesis, buildDebatePrompt } = require('./prompt-builder.cjs');
+const { extractPerformanceSignals, autoUpdateCompetence, loadCompetences, saveCompetences } = require('./sm2-lite.cjs');
+const { scoreResponse, generateFeedbackInstruction } = require('./quality-gate.cjs');
+
+// Strategy genome functions (loaded with try/catch for backward compatibility)
+let loadGenome, expressGenome, deepFreeze, mutateGenome, saveGenome, appendHistory, rollbackGenome;
+try {
+  const strategyGenome = require('./strategy-genome.cjs');
+  loadGenome = strategyGenome.loadGenome;
+  expressGenome = strategyGenome.expressGenome;
+  deepFreeze = strategyGenome.deepFreeze;
+  saveGenome = strategyGenome.saveGenome;
+  // mutateGenome, appendHistory, rollbackGenome may not exist yet; define fallbacks
+  mutateGenome = strategyGenome.mutateGenome || ((genome, signals) => ({ ...genome, genes: { ...genome.genes } }));
+  appendHistory = strategyGenome.appendHistory || (() => {});
+  rollbackGenome = strategyGenome.rollbackGenome || (() => null);
+} catch (err) {
+  // Strategy genome not available; define minimal no-ops (backward compat)
+  loadGenome = () => null;
+  expressGenome = () => '';
+  deepFreeze = () => {};
+  mutateGenome = (genome) => genome;
+  saveGenome = () => {};
+  appendHistory = () => {};
+  rollbackGenome = () => null;
+}
 
 // --- Load API key from .env ---
 let OPENAI_API_KEY = '';
@@ -43,7 +69,11 @@ try {
 const SAFETY_CAP_ROUNDS = 30;
 const DEBATE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const AGENT_DELAY_MS = 200;
-const LOOP_COORDINATOR_INTERVAL = 2; // Run loop coordinator every N rounds
+const LOOP_COORDINATOR_INTERVAL = 1; // Run loop coordinator EVERY round (ADR-007: closer to Principal-Synthesizer pattern)
+
+// --- ADR-009 Capa 1: Quality feedback storage per round ---
+let lastRoundQualityScores = []; // Stores quality scores from the previous round for Loop Coordinator
+let allDebateQualityScores = []; // ADR-009 Capa 2: Accumulates ALL quality scores across rounds for genome fitness
 
 // --- Utility: sleep ---
 
@@ -86,11 +116,26 @@ async function callLLM(prompt, model = 'gpt-4o-mini') {
 
 // --- Loop Coordinator: keeps Figma Make agents talking ---
 
-function buildLoopCoordinatorPrompt(debate, recentMessages, agents, round, maxRounds) {
+function buildLoopCoordinatorPrompt(debate, recentMessages, agents, round, maxRounds, qualityFeedback) {
   const agentList = agents.map(a => `${a.name} (${a.role})`).join(', ');
   const msgBlock = recentMessages.length > 0
     ? recentMessages.map(m => `[${m.participantName} (${m.participantRole})]: ${(m.text || '').slice(0, 200)}`).join('\n')
     : '(No messages yet)';
+
+  // ADR-009 Capa 1: Quality feedback from previous round
+  let qualityBlock = '';
+  if (qualityFeedback && qualityFeedback.length > 0) {
+    qualityBlock = '\nQUALITY SCORES (previous round — use to give SPECIFIC feedback):\n' +
+      qualityFeedback.map(s => {
+        const weak = [];
+        if (s.relevance < 0.4) weak.push(`relevance=${s.relevance}`);
+        if (s.novelty < 0.3) weak.push(`novelty=${s.novelty}`);
+        if (s.concreteness < 0.3) weak.push(`concreteness=${s.concreteness}`);
+        if (s.argumentQuality < 0.3) weak.push(`argumentQuality=${s.argumentQuality}`);
+        const weakStr = weak.length > 0 ? ` WEAK: ${weak.join(', ')}` : ' ALL GOOD';
+        return `  ${s.agentName}: composite=${s.composite}${weakStr}`;
+      }).join('\n') + '\n';
+  }
 
   return `You are a LOOP COORDINATOR for a multi-agent debate with Claude Opus 4.6 agents. Your job is to generate a STRUCTURED coordination signal with 3 components. You do NOT participate in the debate.
 
@@ -100,7 +145,7 @@ AGENTS: ${agentList}
 
 RECENT MESSAGES:
 ${msgBlock}
-
+${qualityBlock}
 Generate a coordination signal (max 150 words) with EXACTLY these 3 sections:
 
 DIRECTIVA: [Who should speak next and what specific action they must take. Name the agent and reference a concrete point from recent messages.]
@@ -152,9 +197,38 @@ Be concise but thorough. Write in the same language as the debate messages.`;
 
 // --- Wait for external agent (coordinated mode) ---
 
+// --- Agent heartbeat tracking ---
+const agentHeartbeats = {}; // { agentName: { lastSeen: timestamp, status: 'thinking'|'composing'|'idle'|'dead' } }
+
+function updateHeartbeat(agentName, status = 'thinking') {
+  agentHeartbeats[agentName] = { lastSeen: Date.now(), status };
+}
+
+function getHeartbeat(agentName) {
+  return agentHeartbeats[agentName] || { lastSeen: 0, status: 'unknown' };
+}
+
+function getAllHeartbeats() {
+  const now = Date.now();
+  const result = {};
+  for (const [name, hb] of Object.entries(agentHeartbeats)) {
+    const elapsed = now - hb.lastSeen;
+    result[name] = {
+      ...hb,
+      elapsed,
+      alive: elapsed < 60000, // Consider dead after 60s without heartbeat
+      status: elapsed > 60000 ? 'dead' : elapsed > 30000 ? 'slow' : hb.status,
+    };
+  }
+  return result;
+}
+
 async function waitForExternalAgent(debateId, agentName, log, timeoutMs = 120000) {
   const startWait = Date.now();
   const initialMsgCount = (dm.read(debateId, 0, 0).messages || []).length;
+
+  // Mark agent as thinking (heartbeat)
+  updateHeartbeat(agentName, 'thinking');
 
   log('turn_request', {
     debateId,
@@ -164,12 +238,14 @@ async function waitForExternalAgent(debateId, agentName, log, timeoutMs = 120000
   });
 
   const agentNameLower = agentName.toLowerCase();
+  let heartbeatCounter = 0;
 
   while (Date.now() - startWait < timeoutMs) {
     const current = dm.read(debateId, 0, 0);
 
     // Check if debate was finalized externally
     if (current.debate && (current.debate.status === 'finished' || current.debate.status === 'cancelled')) {
+      updateHeartbeat(agentName, 'idle');
       log('system', { message: `Debate ${debateId} was finalized during wait for ${agentName}` });
       return null;
     }
@@ -184,13 +260,29 @@ async function waitForExternalAgent(debateId, agentName, log, timeoutMs = 120000
         (m.participantName && m.participantName.toLowerCase() === agentNameLower)
       );
       if (agentMsg) {
+        updateHeartbeat(agentName, 'idle');
         return agentMsg;
       }
+    }
+
+    // Heartbeat: log progress every 10s so dashboard knows agent is alive
+    heartbeatCounter++;
+    if (heartbeatCounter % 5 === 0) { // Every 10s (5 * 2s poll)
+      const elapsed = Math.round((Date.now() - startWait) / 1000);
+      updateHeartbeat(agentName, 'composing');
+      log('agent_heartbeat', {
+        debateId,
+        agent: agentName,
+        elapsed_seconds: elapsed,
+        status: 'composing',
+        message: `${agentName} still composing (${elapsed}s elapsed)`,
+      });
     }
 
     await sleep(2000); // Poll every 2s
   }
 
+  updateHeartbeat(agentName, 'dead');
   return null; // Timeout — agent didn't respond
 }
 
@@ -223,6 +315,36 @@ function computeJaccardSimilarity(a, b) {
   const intersection = new Set([...setA].filter(x => setB.has(x)));
   const union = new Set([...setA, ...setB]);
   return union.size === 0 ? 0 : intersection.size / union.size;
+}
+
+// --- Consensus close detection ---
+
+/**
+ * Detects when a supermajority of agents have voted to close the debate.
+ * Scans recent messages for close patterns (VOTO CIERRE, DONE, CERRAR, etc).
+ * Requires 66%+ of agents OR N-1 agents (whichever is larger) to trigger.
+ *
+ * @param {Array} messages - All debate messages
+ * @param {Array} agents - All debate agents
+ * @param {number} windowSize - Number of recent messages to scan
+ * @returns {boolean} True if consensus close detected
+ */
+function detectConsensusClose(messages, agents, windowSize = 12) {
+  if (!messages || messages.length < agents.length) return false;
+
+  const recentMsgs = messages.slice(-Math.min(windowSize, messages.length));
+  const closePatterns = /\b(VOTO\s*CIERRE|\bDONE\b|\bCERRAR\b|\bFUERA\b|consenso.*cierre|cierre.*consenso|HANDOFF|CLOSING\s*STATEMENT)/i;
+
+  const voterSet = new Set();
+  for (const msg of recentMsgs) {
+    if (msg.text && closePatterns.test(msg.text)) {
+      voterSet.add(msg.participantName);
+    }
+  }
+
+  // Require supermajority: 66% OR N-1, whichever is larger
+  const threshold = Math.max(Math.ceil(agents.length * 0.66), agents.length - 1);
+  return voterSet.size >= threshold;
 }
 
 // --- Build a structural summary (no AI, just facts) ---
@@ -291,8 +413,62 @@ async function runDebate(config) {
 
   log('system', { message: `Starting debate: "${tema}" with ${numAgents} agents, situacion: ${situacion}, mode: coordinated` });
 
-  // 1. Create debate via crearSituacion
-  const creation = dm.crearSituacion(situacion, tema, numAgents);
+  // 0.9 Dedup: check for existing active debates with similar topic
+  const allDebates = dm.listDebates ? dm.listDebates() : [];
+  const activeDebates = allDebates.filter(d => d.status === 'active');
+  
+  // Clean stale debates (0 messages, older than 10 minutes)
+  const now = Date.now();
+  for (const d of activeDebates) {
+    const msgCount = (d.messages || []).length;
+    const age = d.createdAt ? now - new Date(d.createdAt).getTime() : 0;
+    if (msgCount === 0 && age > 10 * 60 * 1000) {
+      try {
+        dm.finishDebate(d.id, 'Auto-closed: stale debate with 0 messages', true);
+        log('system', { message: `[dedup] Auto-closed stale debate ${d.id} (0 msgs, ${Math.round(age/60000)}min old)` });
+      } catch (e) { /* ignore */ }
+    }
+  }
+  
+  // Topic similarity check: find active debate with >50% keyword overlap
+  function normalizeForDedup(topic) {
+    return (topic || '').toLowerCase()
+      .replace(/\[.*?\]/g, '') // Remove [🛠️ MEJORA DE CÓDIGO] etc
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 3)
+      .filter(w => !['para','como','este','todo','code','codigo','mejora','sprint','strategy','genome','debate','bugs','fixes'].includes(w));
+  }
+  
+  const newTokens = new Set(normalizeForDedup(tema));
+  let existingDebateId = null;
+  
+  if (newTokens.size > 0) {
+    for (const d of activeDebates) {
+      if (d.status !== 'active') continue;
+      const existingTokens = new Set(normalizeForDedup(d.topic));
+      if (existingTokens.size === 0) continue;
+      const intersection = [...newTokens].filter(t => existingTokens.has(t));
+      const union = new Set([...newTokens, ...existingTokens]);
+      const similarity = intersection.length / union.size;
+      if (similarity > 0.4) {
+        existingDebateId = d.id;
+        log('system', { message: `[dedup] Found similar active debate ${d.id} (${(similarity*100).toFixed(0)}% overlap). Reusing instead of creating duplicate.` });
+        break;
+      }
+    }
+  }
+  
+  // 1. Create debate via crearSituacion (or reuse existing)
+  let creation;
+  if (existingDebateId) {
+    // Reuse existing debate
+    const existingDebate = allDebates.find(d => d.id === existingDebateId);
+    creation = { debate: existingDebate, agents: existingDebate.participants || [] };
+    log('system', { message: `[dedup] Reusing debate ${existingDebateId} instead of creating new one` });
+  } else {
+    creation = dm.crearSituacion(situacion, tema, numAgents);
+  }
   if (creation.error) {
     throw new Error(`Failed to create debate: ${creation.error}`);
   }
@@ -325,6 +501,25 @@ async function runDebate(config) {
     log('error', { message: `[principles] Failed to load: ${err.message}` });
   }
 
+  // 1.6 Load and freeze strategy genome (ADR-009 Capa 2)
+  let frozenGenome = null;
+  let genomePhenotype = '';
+  if (loadGenome) {
+    try {
+      frozenGenome = loadGenome();
+      if (frozenGenome) {
+        genomePhenotype = expressGenome(frozenGenome);
+        deepFreeze(frozenGenome);
+        log('system', { message: `[genome] Loaded and frozen genome v${frozenGenome.version}. Phenotype: ${genomePhenotype ? 'active' : 'neutral'}` });
+      }
+    } catch (err) {
+      log('error', { message: `[genome] Failed to load: ${err.message}` });
+    }
+  }
+
+  // 1.7 Reset quality scores accumulator for this debate
+  allDebateQualityScores = [];
+
   // 2. Run rounds
   const effectiveMaxRounds = maxRounds > 0 ? Math.min(maxRounds, SAFETY_CAP_ROUNDS) : SAFETY_CAP_ROUNDS;
   let roundCount = 0;
@@ -345,7 +540,7 @@ async function runDebate(config) {
       if (roundCount >= 2 && roundCount % LOOP_COORDINATOR_INTERVAL === 0 && debate.messages.length > 0) {
         try {
           const recentMsgs = debate.messages.slice(-6);
-          const coordPrompt = buildLoopCoordinatorPrompt(debate, recentMsgs, agents, roundCount, effectiveMaxRounds);
+          const coordPrompt = buildLoopCoordinatorPrompt(debate, recentMsgs, agents, roundCount, effectiveMaxRounds, lastRoundQualityScores);
           loopInstruction = await callLLM(coordPrompt, model);
           if (loopInstruction) {
             log('loop_coordinator', { round: roundCount, instruction: loopInstruction.trim() });
@@ -399,6 +594,71 @@ async function runDebate(config) {
           log('system', { message: 'Responses becoming repetitive. Ending debate.' });
           break;
         }
+      }
+
+      // Check for consensus close (agents voting to end the debate)
+      if (debate.messages.length >= agents.length * 2) {
+        if (detectConsensusClose(debate.messages, agents, agents.length * 2)) {
+          log('system', { message: `Consensus close detected: ${agents.length}+ agents voted to end. Finishing debate.` });
+          break;
+        }
+      }
+
+      // Generate round synthesis (Principal Agent pattern from Claude Code)
+      try {
+        const roundMsgs = (debate.messages || []).filter(m => m.round === roundCount);
+        if (roundMsgs.length >= 2) {
+          const roundSynth = buildRoundSynthesis(roundMsgs, roundCount);
+          if (roundSynth) {
+            dm.addContext(debateId, `round-${roundCount}-synthesis`, roundSynth, 'round-synthesis');
+            log('round_synthesis', { round: roundCount, agentCount: roundMsgs.length, preview: roundSynth.slice(0, 200) });
+          }
+
+          // ── CONTINUOUS LEARNING: Auto-calibrate agent competence per round ──
+          try {
+            const competences = loadCompetences();
+            let updated = 0;
+            for (const agent of agents) {
+              const signals = extractPerformanceSignals(roundMsgs, agent.name);
+              if (signals) {
+                const result = autoUpdateCompetence(competences, agent.name, signals);
+                if (result) updated++;
+              }
+            }
+            if (updated > 0) {
+              saveCompetences(competences);
+              log('learning', {
+                round: roundCount,
+                message: `Auto-calibrated ${updated}/${agents.length} agent competences`,
+                type: 'competence_update',
+              });
+            }
+          } catch (learnErr) {
+            log('error', { message: `[continuous-learning] competence update failed: ${learnErr.message}` });
+          }
+
+          // ── ADR-009 Capa 1: Score round messages for feedback loop ──
+          try {
+            const participantNames = agents.map(a => a.name);
+            const { parseCheckpoint } = require('./prompt-builder.cjs');
+            const scorePromises = roundMsgs.map((m, idx) => {
+              const checkpoint = parseCheckpoint(m.text || '', m.participantName || 'unknown', roundCount);
+              return scoreResponse(m.text || '', tema, m.participantName || 'unknown', roundCount, idx, participantNames, checkpoint)
+                .catch(() => ({ agentName: m.participantName || 'unknown', composite: 0, relevance: 0, novelty: 0, concreteness: 0, argumentQuality: 0, structuredThought: 0 }))
+            });
+            lastRoundQualityScores = await Promise.all(scorePromises);
+            allDebateQualityScores.push(...lastRoundQualityScores);
+            log('learning', {
+              round: roundCount,
+              message: `Quality scored ${lastRoundQualityScores.length} messages (${allDebateQualityScores.length} total). Avg composite: ${(lastRoundQualityScores.reduce((s, q) => s + q.composite, 0) / lastRoundQualityScores.length).toFixed(3)}`,
+              type: 'quality_feedback',
+            });
+          } catch (qErr) {
+            log('error', { message: `[quality-feedback] scoring failed: ${qErr.message}` });
+          }
+        }
+      } catch (err) {
+        log('error', { message: `[round-synthesis] failed: ${err.message}` });
       }
 
       // After processing, check if we need to advance the round
@@ -500,6 +760,74 @@ async function runDebate(config) {
     log('error', { message: `[outcomes] Failed to record: ${err.message}` });
   }
 
+  // 3.67 Strategy Genome mutation (ADR-009 Capa 2: blended fitness evolutionary learning)
+  try {
+    const freshGenome = loadGenome(); // Load fresh (unfrozen) copy for mutation
+    if (allDebateQualityScores.length > 0) {
+      // Compute average quality scores across all rounds
+      const avgSignals = { concreteness: 0, argumentQuality: 0, relevance: 0, novelty: 0, structuredThought: 0 };
+      for (const s of allDebateQualityScores) {
+        avgSignals.concreteness += (s.concreteness || 0);
+        avgSignals.argumentQuality += (s.argumentQuality || 0);
+        avgSignals.relevance += (s.relevance || 0);
+        avgSignals.novelty += (s.novelty || 0);
+        avgSignals.structuredThought += (s.structuredThought || 0);
+      }
+      const count = allDebateQualityScores.length;
+      avgSignals.concreteness /= count;
+      avgSignals.argumentQuality /= count;
+      avgSignals.relevance /= count;
+      avgSignals.novelty /= count;
+      avgSignals.structuredThought /= count;
+
+      // Blend with effective rating ONLY if human rating exists (70% quality-gate, 30% rating)
+      const outcomesForGenome = require('./debate-outcomes.cjs');
+      const outcomeForGenome = outcomesForGenome.getOutcome(debateId);
+      // Only blend rating when there is an explicit human rating — avoids constant bias from neutral fallback
+      const hasHumanRating = !!(outcomeForGenome && outcomeForGenome.rating);
+      const blendedSignals = hasHumanRating
+        ? (() => {
+            const effectiveRating = outcomesForGenome.getEffectiveRating(outcomeForGenome) || 3;
+            const ratingNorm = effectiveRating / 5;
+            return {
+              concreteness: avgSignals.concreteness * 0.7 + ratingNorm * 0.3,
+              argumentQuality: avgSignals.argumentQuality * 0.7 + ratingNorm * 0.3,
+              relevance: avgSignals.relevance * 0.7 + ratingNorm * 0.3,
+              novelty: avgSignals.novelty * 0.7 + ratingNorm * 0.3,
+              structuredThought: avgSignals.structuredThought * 0.7 + ratingNorm * 0.3,
+            };
+          })()
+        : { ...avgSignals };
+
+      let mutated = mutateGenome(freshGenome, blendedSignals);
+      // Check for rollback: if 3 consecutive bad debates, reset genome to defaults
+      const rolledBack = rollbackGenome(mutated);
+      if (rolledBack) {
+        mutated = rolledBack;
+        log('warning', { message: `[genome] ROLLBACK triggered after ${ROLLBACK_WINDOW} consecutive bad debates. Reset to defaults.`, type: 'genome_rollback' });
+      }
+      saveGenome(mutated);
+      appendHistory({
+        generation: mutated.generation,
+        genes: { ...mutated.genes },
+        fitness: mutated.fitnessEMA ?? 0.5,
+        signals: blendedSignals,
+        debateId,
+        rolledBack: !!rolledBack,
+      });
+      log('learning', {
+        message: `[genome] Mutated with blended fitness (${count} scores). concreteness=${blendedSignals.concreteness.toFixed(3)}, argQuality=${blendedSignals.argumentQuality.toFixed(3)}, relevance=${blendedSignals.relevance.toFixed(3)}`,
+        type: 'genome_mutation',
+        genes: { ...mutated.genes },
+      });
+    }
+  } catch (err) {
+    // Fail silently if strategy-genome.cjs doesn't exist yet (backward compat)
+    if (!err.message.includes('Cannot find module')) {
+      log('error', { message: `[genome] Mutation failed: ${err.message}` });
+    }
+  }
+
   // 3.7 Agent retrospectives via OpenAI (end of debate — mejora continua)
   const retrospectives = [];
   try {
@@ -583,41 +911,50 @@ async function processRoundTurns(pending, debate, debateId, agents, log, startTi
     // Fall back to default order if sm2-lite fails
   }
 
-  for (const turn of orderedTurns) {
-    // Timeout check
-    if (Date.now() - startTime > DEBATE_TIMEOUT_MS) {
-      break;
-    }
+  // --- PARALLEL WAIT (ADR-007 Level 1) ---
+  // Launch all agent waits simultaneously. Results processed in competence order.
+  if (Date.now() - startTime > DEBATE_TIMEOUT_MS) {
+    log('system', { message: 'Debate timeout before parallel batch.' });
+    return;
+  }
 
-    // Each turn has an .agent object with { name, role, roleDesc }
+  const resolvedTurns = orderedTurns.map(turn => {
     const turnAgent = turn.agent || {};
-    const agent = agents.find(a => a.name === turnAgent.name) || {
-      name: turnAgent.name || 'unknown',
-      role: turnAgent.role || 'participant',
-      desc: turnAgent.roleDesc || turnAgent.role || 'participant',
+    return {
+      turn,
+      agent: agents.find(a => a.name === turnAgent.name) || {
+        name: turnAgent.name || 'unknown',
+        role: turnAgent.role || 'participant',
+        desc: turnAgent.roleDesc || turnAgent.role || 'participant',
+      },
     };
+  });
 
-    // Wait for external agent to call decir()
-    const agentMsg = await waitForExternalAgent(debateId, agent.name, log, turnTimeout);
+  const waitPromises = resolvedTurns.map(({ agent }) =>
+    waitForExternalAgent(debateId, agent.name, log, turnTimeout)
+      .then(msg => ({ agent, msg }))
+      .catch(() => ({ agent, msg: null }))
+  );
 
-    if (agentMsg) {
+  const results = await Promise.allSettled(waitPromises);
+
+  for (const result of results) {
+    const val = result.status === 'fulfilled' ? result.value : { agent: { name: 'unknown', role: 'unknown' }, msg: null };
+    if (val.msg) {
       log('agent_message', {
-        agent: agent.name,
-        role: agent.role,
+        agent: val.agent.name,
+        role: val.agent.role,
         round: debate.currentRound,
-        wordCount: (agentMsg.text || '').trim().split(/\s+/).length,
-        preview: (agentMsg.text || '').slice(0, 200),
+        wordCount: (val.msg.text || '').trim().split(/\s+/).length,
+        preview: (val.msg.text || '').slice(0, 200),
       });
     } else {
       log('turn_timeout', {
         debateId,
-        agent: agent.name,
-        message: `${agent.name} did not respond within ${Math.round(turnTimeout / 1000)}s — skipping turn`,
+        agent: val.agent.name,
+        message: `${val.agent.name} did not respond within ${Math.round(turnTimeout / 1000)}s — skipping turn`,
       });
     }
-
-    // Small delay between agents
-    await sleep(AGENT_DELAY_MS);
   }
 }
 
