@@ -1818,6 +1818,7 @@ async function pollWorld() {
     } catch { /* genome endpoint not available, ignore */ }
 
     renderAgentCards();
+    renderGenomeBar();
 
   } catch (e) {
     document.getElementById('statusText').textContent = 'Connection error';
