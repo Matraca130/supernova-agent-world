@@ -1301,6 +1301,10 @@ let lastMsgCount = 0;
 let debateData = null;
 let agentsDirty = false;
 
+// ── Micro-round room assignments (from orchestrator) ──
+let microAssignments = {}; // { agentName: { room, subtopic, status } }
+let microPhaseActive = false;
+
 // ── Room assignment logic (using roles, state, and "thinking" detection) ──
 // Agent state tracking for visual indicators
 const agentStates = {}; // { agentName: { state: 'thinking'|'speaking'|'reflecting'|'idle', since: timestamp } }
