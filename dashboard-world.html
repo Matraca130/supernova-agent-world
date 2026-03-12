@@ -1333,6 +1333,21 @@ function getAgentRoom(agentName, debate) {
     if (msgs[i].participantName === agentName) { lastSpokeIndex = msgs.length - 1 - i; break; }
   }
 
+  // MICRO-ROUND OVERRIDE: If a micro-round is active and this agent has a room assignment,
+  // send them to that room regardless of other logic. This makes agents visually
+  // move between rooms when micro-debates are happening.
+  if (microPhaseActive && microAssignments[agentName]) {
+    const ma = microAssignments[agentName];
+    if (ma.status === 'debating') {
+      updateAgentState(agentName, 'thinking');
+      return ma.room || 'reason';
+    }
+    if (ma.status === 'concluded') {
+      updateAgentState(agentName, 'reflecting');
+      return 'stats'; // Concluded agents go to analytics to review results
+    }
+  }
+
   // Currently speaking (last message is theirs) → Sala Debate
   if (lastSpokeIndex === 0) {
     updateAgentState(agentName, 'speaking');
