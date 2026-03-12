@@ -1582,6 +1582,11 @@ function gameLoop(time) {
   for (let i = 0; i < roomValues.length; i++) drawRoom(roomValues[i]);
   drawFurniture();
 
+  // Micro-topic tree overlay (drawn above rooms, below agents)
+  if (microPhaseActive && Object.keys(microAssignments).length > 0) {
+    drawMicroTopicTree();
+  }
+
   // Pixel art mode
   ctx.imageSmoothingEnabled = false;
 
