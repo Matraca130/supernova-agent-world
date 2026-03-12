@@ -669,6 +669,42 @@ async function runDebate(config) {
         log('error', { message: `[round-synthesis] failed: ${err.message}` });
       }
 
+      // ── MICRO-ROUND: Auto-decomposition phase ────────────────────────
+      // After round synthesis, check if the conversation should be decomposed
+      // into micro-debates for parallel exploration of subtopics.
+      if (microOrchestrator && agents.length >= 4) {
+        try {
+          if (microOrchestrator.shouldDecompose(debate, roundCount)) {
+            log('system', {
+              message: `[micro-round] Entering decomposition phase (round ${roundCount}, ${agents.length} agents)...`,
+            });
+
+            const microResult = await microOrchestrator.runMicroRound(
+              debateId,
+              debate,
+              agents,
+              log,
+              turnTimeout
+            );
+
+            if (!microResult.skipped) {
+              log('system', {
+                message: `[micro-round] Completed: ${microResult.microDebateCount} micro-debates, synthesis: ${microResult.synthesisSuccess}. Main debate enriched with conclusions.`,
+              });
+
+              // Feed decomposition quality to Strategy Genome
+              try {
+                microOrchestrator.feedbackToGenome(microResult, lastRoundQualityScores, log);
+              } catch (genomeErr) {
+                log('error', { message: `[micro-round] Genome feedback failed: ${genomeErr.message}` });
+              }
+            }
+          }
+        } catch (microErr) {
+          log('error', { message: `[micro-round] failed: ${microErr.message}` });
+        }
+      }
+
       // After processing, check if we need to advance the round
       const postCheck = dm.getAllPendingTurns(debateId);
       if (postCheck.allSpoke) {
